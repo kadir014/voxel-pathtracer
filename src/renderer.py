@@ -152,6 +152,10 @@ class Renderer:
         )
 
         self._pt_program["s_bluenoise"] = 0
+        self._pt_program["s_grid"] = 1
+        self._pt_program["s_sky"] = 2
+        self._pt_program["s_albedo_atlas"] = 3
+        self._pt_program["s_emissive_atlas"] = 4
         self._pt_program["u_ray_count"] = 8
         self._pt_program["u_bounces"] = 2
         self._pt_program["u_noise_method"] = 1
@@ -199,7 +203,68 @@ class Renderer:
         self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._post_fbo = self._context.framebuffer(color_attachments=(self._post_target_texture,))
 
+        sky_surf = pygame.image.load("data/qwantani_dusk_2_puresky.png")
+        self._sky_texture = self._context.texture(
+            sky_surf.get_size(),
+            3,
+            pygame.image.tobytes(sky_surf, "RGB", True)
+        )
+        self._sky_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._sky_texture.repeat_x = True
+        self._sky_texture.repeat_y = True
+
+        self.grid_size = (10, 10, 10) # x, y, z
+        self._voxel_tex = self._context.texture3d(self.grid_size, 1)
+        self._voxel_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+
+        self.grid = {}
+        for y in range(self.grid_size[1]):
+            for z in range(self.grid_size[2]):
+                for x in range(self.grid_size[0]):
+                    self.grid[(x, y, z)] = 0
+
         self.settings = RendererSettings(self)
+
+
+        self.block_size = (16, 16)
+
+        self.block_order = (
+            None, # 0 is air
+            "cobblestone",
+            "dirt",
+            "glowstone",
+            "grass"
+        )
+
+        self.block_textures = {
+            None: pygame.Surface(self.block_size),
+            "cobblestone": pygame.image.load("data/blocks/cobblestone.png"),
+            "dirt": pygame.image.load("data/blocks/dirt.png"),
+            "glowstone": pygame.image.load("data/blocks/glowstone.png"),
+            "glowstone_emissive": pygame.image.load("data/blocks/glowstone.png"),
+            "grass_top": pygame.image.load("data/blocks/grass_top.png"),
+            "grass_side": pygame.image.load("data/blocks/grass_side.png"),
+        }
+
+        self.block_atlas = {
+            # top bottom side
+            "cobblestone": ("cobblestone", "cobblestone", "cobblestone"),
+            "dirt": ("dirt", "dirt", "dirt"),
+            "glowstone": ("glowstone", "glowstone", "glowstone"),
+            "grass": ("grass_top", "dirt", "grass_side")
+        }
+
+        self.emissive_atlas = {
+            # top bottom side
+            "cobblestone": (None, None, None),
+            "dirt": (None, None, None),
+            "glowstone": ("glowstone_emissive", "glowstone_emissive", "glowstone_emissive"),
+            #"glowstone": (None, None, None),
+            "grass": (None, None, None)
+        }
+
+        self.generate_block_atlas_texture()
+        self.generate_emissive_atlas_texture()
 
     def __del__(self) -> None:
         self._context.release()
@@ -210,11 +275,141 @@ class Renderer:
         dtype = "f" if isinstance(data[0], float) else "I"
         return self._context.buffer(array(dtype, data))
 
+    def update_grid(self) -> None:
+        layers = []
+        for layer_i in range(self.grid_size[1]):
+            surf = pygame.Surface((self.grid_size[0], self.grid_size[2]))
+            layers.append(surf)
+
+            # z -> layer_i
+            # x -> x
+            # y = height - y
+
+            for y in range(self.grid_size[1]):
+                for x in range(self.grid_size[0]):
+                    voxel = self.grid[x, y, layer_i]
+
+                    surf.set_at((x, (self.grid_size[1] - 1) - y), (voxel, voxel, voxel))
+
+        data = bytearray()
+        for layer in layers:
+            layer_data = pygame.image.tobytes(layer, "RGB", True)
+            for i, byte in enumerate(layer_data):
+                # Only the red channel
+                if (i % 3 == 0):
+                    data.append(byte)
+
+        self._voxel_tex.write(data)
+
+    def generate_block_atlas_texture(self) -> None:
+        # atlas -> 3xN
+        # N is the amount of block variants
+        # each block texture is 16x16
+
+        n_blocks = len(self.block_atlas)
+
+        self.block_atlas_tex = self._context.texture(
+            (self.block_size[0] * 3, self.block_size[1] * n_blocks),
+            3
+        )
+        self.block_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        print(f"Block atlas size: {self.block_atlas_tex.width}x{self.block_atlas_tex.height}")
+
+        for i, block_variant in enumerate(self.block_order):
+            if block_variant is None: continue
+
+            top_surf = self.block_textures[self.block_atlas[block_variant][0]]
+            bottom_surf = self.block_textures[self.block_atlas[block_variant][1]]
+            side_surf = self.block_textures[self.block_atlas[block_variant][2]]
+            top_data = pygame.image.tobytes(top_surf, "RGB", True)
+            bottom_data = pygame.image.tobytes(bottom_surf, "RGB", True)
+            side_data = pygame.image.tobytes(side_surf, "RGB", True)
+
+            self.block_atlas_tex.write(
+                top_data,
+                viewport=(
+                    self.block_size[0] * 0,
+                    self.block_size[1] * (i-1),
+                    self.block_size[0],
+                    self.block_size[1]
+                )
+            )
+            self.block_atlas_tex.write(
+                bottom_data,
+                viewport=(
+                    self.block_size[0] * 1,
+                    self.block_size[1] * (i-1),
+                    self.block_size[0],
+                    self.block_size[1]
+                )
+            )
+            self.block_atlas_tex.write(
+                side_data,
+                viewport=(
+                    self.block_size[0] * 2,
+                    self.block_size[1] * (i-1),
+                    self.block_size[0],
+                    self.block_size[1]
+                )
+            )
+    
+    def generate_emissive_atlas_texture(self) -> None:
+        n_blocks = len(self.block_atlas)
+
+        self.emissive_atlas_tex = self._context.texture(
+            (self.block_size[0] * 3, self.block_size[1] * n_blocks),
+            3
+        )
+        self.emissive_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        print(f"Emissive atlas size: {self.emissive_atlas_tex.width}x{self.emissive_atlas_tex.height}")
+
+        for i, block_variant in enumerate(self.block_order):
+            if block_variant is None: continue
+
+            top_surf = self.block_textures[self.emissive_atlas[block_variant][0]]
+            bottom_surf = self.block_textures[self.emissive_atlas[block_variant][1]]
+            side_surf = self.block_textures[self.emissive_atlas[block_variant][2]]
+            top_data = pygame.image.tobytes(top_surf, "RGB", True)
+            bottom_data = pygame.image.tobytes(bottom_surf, "RGB", True)
+            side_data = pygame.image.tobytes(side_surf, "RGB", True)
+
+            self.emissive_atlas_tex.write(
+                top_data,
+                viewport=(
+                    self.block_size[0] * 0,
+                    self.block_size[1] * (i-1),
+                    self.block_size[0],
+                    self.block_size[1]
+                )
+            )
+            self.emissive_atlas_tex.write(
+                bottom_data,
+                viewport=(
+                    self.block_size[0] * 1,
+                    self.block_size[1] * (i-1),
+                    self.block_size[0],
+                    self.block_size[1]
+                )
+            )
+            self.emissive_atlas_tex.write(
+                side_data,
+                viewport=(
+                    self.block_size[0] * 2,
+                    self.block_size[1] * (i-1),
+                    self.block_size[0],
+                    self.block_size[1]
+                )
+            )
+
     def render(self) -> None:
         """ Render one frame. """
 
         self._pathtracer_fbo.use()
         self._bluenoise_texture.use(0)
+        self._voxel_tex.use(1)
+        self._sky_texture.use(2)
+        self.block_atlas_tex.use(3)
+        self.emissive_atlas_tex.use(4)
         self._pt_vao.render()
 
         self._post_fbo.use()

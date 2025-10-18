@@ -22,6 +22,9 @@
 #define EPSILON 0.0005
 #define BIG_VALUE 10000.0
 #define BLUENOISE_SIZE 1024
+#define VOXEL_SIZE 5.0
+#define MAX_DDA_STEPS 34
+#define GRID_SIZE 10
 
 
 in vec2 v_uv;
@@ -34,6 +37,10 @@ uniform int u_noise_method;
 uniform vec2 u_resolution;
 
 uniform sampler2D s_bluenoise;
+uniform sampler3D s_grid;
+uniform sampler2D s_sky;
+uniform sampler2D s_albedo_atlas;
+uniform sampler2D s_emissive_atlas;
 
 
 struct Camera {
@@ -60,102 +67,138 @@ struct Material {
 };
 
 struct HitInfo {
-    bool hit;
-    vec3 point;
-    vec3 normal;
-    Material material;
-};
-
-struct Sphere {
-    vec3 center;
-    float radius;
-    Material material;
-};
-
-struct Triangle {
-    vec3 v0;
-    vec3 v1;
-    vec3 v2;
-    vec3 normal;
-    Material material;
-};
-
-struct Quad {
-    vec3 v0;
-    vec3 v1;
-    vec3 v2;
-    vec3 v3;
-    Material material;
+    bool hit; // Collision with ray happened?
+    vec3 point; // Collision point on the surface in world space
+    vec3 normal; // Normal of the collision surface
+    int block_id;
+    vec2 face_uv;
+    //Material material;
 };
 
 
-/*
-    Sphere x Ray intersection function by Inigo Quilez
-    https://iquilezles.org/articles/intersectors/
-*/
-HitInfo sphere_x_ray(Sphere sphere, Ray ray) {
-    HitInfo empty_hitinfo = HitInfo(
+bool out_of_grid(vec3 voxel) {
+    float size = float(GRID_SIZE);
+
+    return (voxel.x < 0.0 || voxel.y < 0.0 || voxel.z < 0.0 ||
+            voxel.x >= size || voxel.y >= size || voxel.z >= size);
+}
+
+bool is_solid(vec3 voxel) {
+    vec4 s = texelFetch(s_grid, ivec3(voxel), 0);
+
+    if (s.r > 0.0) {
+        return true;
+    }
+
+    return false;
+}
+
+vec3 sign_vec3(vec3 v) {
+    return vec3(
+        int(v.x > 0) - int(v.x < 0),
+        int(v.y > 0) - int(v.y < 0),
+        int(v.z > 0) - int(v.z < 0)
+    );
+}
+
+HitInfo dda(Ray ray) {
+    HitInfo hitinfo = HitInfo(
         false,
         vec3(0.0),
         vec3(0.0),
-        Material(vec3(0.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
+        0,
+        vec2(0.0)
+        //Material(vec3(1.0, 1.0, 1.0), vec3(0.0), 1.0, vec3(1.0), 0.2)
     );
 
-    vec3 oc = ray.origin - sphere.center;
-    float b = dot(oc, ray.dir);
-    float c = dot(oc, oc) - sphere.radius * sphere.radius;
-    float h = b * b - c;
+    vec3 voxel = ray.origin / VOXEL_SIZE;
+    voxel.x = floor(voxel.x);
+    voxel.y = floor(voxel.y);
+    voxel.z = floor(voxel.z);
 
-    // No intersection
-    if (h < 0.0) return empty_hitinfo;
-    h = sqrt(h);
+    vec3 step_dir = sign_vec3(ray.dir);
 
-    vec2 t = vec2(-b-h, -b+h);
-
-    // Ray does NOT intersect the sphere
-    if (t.y < 0.0 ) return empty_hitinfo;
-
-    float d = 0.0;
-    if (t.x < 0.0) d = t.y; // Ray origin inside the sphere, t.y is intersection distance
-    else d = t.x; // Ray origin outside the sphere, t.x is intersection distance
-
-    vec3 intersection = ray.origin + ray.dir * d;
-    vec3 normal = normalize(intersection - sphere.center);
-
-    return HitInfo(true, intersection, normal, sphere.material);
-}
-
-/*
-    Triangle x Ray intersection function by Inigo Quilez
-    https://iquilezles.org/articles/intersectors/
-*/
-HitInfo triangle_x_ray(Triangle triangle, Ray ray) {
-    HitInfo empty_hitinfo = HitInfo(
-        false,
-        vec3(0.0),
-        vec3(0.0),
-        Material(vec3(0.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
+    vec3 next_boundary = vec3(
+        (voxel.x + (step_dir.x > 0.0 ? 1.0 : 0.0)) * VOXEL_SIZE,
+        (voxel.y + (step_dir.y > 0.0 ? 1.0 : 0.0)) * VOXEL_SIZE,
+        (voxel.z + (step_dir.z > 0.0 ? 1.0 : 0.0)) * VOXEL_SIZE
     );
 
-    vec3 v1v0 = triangle.v1 - triangle.v0;
-    vec3 v2v0 = triangle.v2 - triangle.v0;
-    vec3 rov0 = ray.origin - triangle.v0;
-    vec3 n = cross(v1v0, v2v0);
-    vec3 q = cross(rov0, ray.dir);
-    float d = 1.0 / dot(ray.dir, n);
-    float u = d * dot(-q, v2v0);
-    float v = d * dot(q, v1v0);
-    float t = d * dot(-n, rov0);
+    vec3 t_max = next_boundary - ray.origin;
+    if (ray.dir.x == 0.0) t_max.x = BIG_VALUE;
+    else t_max.x /= ray.dir.x;
+    if (ray.dir.y == 0.0) t_max.y = BIG_VALUE;
+    else t_max.y /= ray.dir.y;
+    if (ray.dir.z == 0.0) t_max.z = BIG_VALUE;
+    else t_max.z /= ray.dir.z;
 
-    if (u < 0.0 || v < 0.0 || (u + v) > 1.0 ) return empty_hitinfo;
-    if (t <= 0.0) return empty_hitinfo;
+    vec3 t_delta = vec3(0.0);
+    if (ray.dir.x == 0.0) t_delta.x = BIG_VALUE;
+    else t_delta.x = abs(VOXEL_SIZE / ray.dir.x);
+    if (ray.dir.y == 0.0) t_delta.y = BIG_VALUE;
+    else t_delta.y = abs(VOXEL_SIZE / ray.dir.y);
+    if (ray.dir.z == 0.0) t_delta.z = BIG_VALUE;
+    else t_delta.z = abs(VOXEL_SIZE / ray.dir.z);
 
-    vec3 intersection = ray.origin + t * ray.dir;
-    vec3 normal = triangle.normal;
-    if (dot(normal, ray.dir) > 0.0) normal = -normal;
+    // Traverse
+    for (int i = 0; i < MAX_DDA_STEPS; i++) {
+        // ray can start out of the map
+        // if (out_of_grid(voxel)) {
+        //     return false;
+        // }
 
-    return HitInfo(true, intersection, normal, triangle.material);
+        float hit_t = min(t_max.x, min(t_max.y, t_max.z));
+
+        if (t_max.x < t_max.y && t_max.x < t_max.z) {
+            voxel.x += step_dir.x;
+            t_max.x += t_delta.x;
+            hitinfo.normal = vec3(-step_dir.x, 0.0, 0.0);
+        }
+        else if (t_max.y < t_max.z) {
+            voxel.y += step_dir.y;
+            t_max.y += t_delta.y;
+            hitinfo.normal = vec3(0.0, -step_dir.y, 0.0);
+        }
+        else {
+            voxel.z += step_dir.z;
+            t_max.z += t_delta.z;
+            hitinfo.normal = vec3(0.0, 0.0, -step_dir.z);
+        }
+
+        vec4 voxel_sample = texelFetch(s_grid, ivec3(voxel), 0);
+        if (voxel_sample.r > 0.0) {
+            hitinfo.hit = true;
+
+            // if (voxel.y > 0.0) {
+            //     hitinfo.material.emissive = vec3(1.0) * 1.5;
+            // }
+
+            hitinfo.point = ray.origin + ray.dir * hit_t;
+
+            hitinfo.block_id = int(voxel_sample.r * 255.0);
+
+            // WHY DID DIVIDING BY VOXEL SIZE WORK
+            vec3 local = fract(hitinfo.point / VOXEL_SIZE);
+
+            // Project onto correct plane (branchless)
+            vec3 abs_n = abs(hitinfo.normal);
+            hitinfo.face_uv = local.yz * abs_n.x + local.xz * abs_n.y + local.xy * abs_n.z;
+
+            // TODO: WTF IS HAPPENING HERE?
+            vec2 uv = hitinfo.face_uv;
+            uv = mix(uv, uv.yx, abs_n.x); // swap axes for X faces
+            uv.x = mix(uv.x, 1.0 - uv.x, step(0.0, hitinfo.normal.z));
+            uv.y = mix(uv.y, uv.y, step(0.0, -hitinfo.normal.y));
+
+            hitinfo.face_uv = uv;
+
+            break;
+        }
+    }
+
+    return hitinfo;
 }
+
 
 /*
     https://en.wikipedia.org/wiki/UV_mapping#Finding_UV_on_a_sphere
@@ -202,33 +245,6 @@ vec4 bluenoise() {
     return fract(bluenoise_sample);
 }
 
-int bluenoise_counter;
-float bluenoise2() {
-    int x = int(bluenoise_seed.x * u_resolution.x);
-    int y = int(bluenoise_seed.y * u_resolution.y);
-    int xi = (x + (bluenoise_counter * 37)) & (BLUENOISE_SIZE - 1);
-    int yi = (y + (bluenoise_counter * 57)) & (BLUENOISE_SIZE - 1);
-    bluenoise_counter++;
-    vec4 bluenoise_sample = texture(s_bluenoise, vec2(xi, yi) / vec2(BLUENOISE_SIZE, BLUENOISE_SIZE));
-    return fract(bluenoise_sample).r;
-}
-
-int current_sample_idx;
-float bluenoise3(int dim) {
-    // int x = int(bluenoise_seed.x * u_resolution.x);
-    // int y = int(bluenoise_seed.y * u_resolution.y);
-    // int xi = (x + current_sample_idx * 73 + dim * 17) & (BLUENOISE_SIZE - 1);
-    // int yi = (y + current_sample_idx * 91 + dim * 23) & (BLUENOISE_SIZE - 1);
-    
-    // vec4 bluenoise_sample = texture(s_bluenoise, vec2(xi, yi) / vec2(BLUENOISE_SIZE, BLUENOISE_SIZE));
-    // return fract(bluenoise_sample).r;
-
-    ivec2 pixel = ivec2(bluenoise_seed * u_resolution);
-    float seed = texelFetch(s_bluenoise, ivec2(pixel) & (BLUENOISE_SIZE-1), 0).r;
-    float r = fract(seed + float(current_sample_idx) * 0.618034 + float(dim) * 0.0426727);
-    return r;
-}
-
 
 vec3 random_in_unit_sphere() {
     float r0 = 0.0;
@@ -238,8 +254,8 @@ vec3 random_in_unit_sphere() {
         r1 = prng();
     }
     else if (u_noise_method == 2) {
-        r0 = bluenoise3(0);
-        r1 = bluenoise3(1);
+        r0 = bluenoise().g;
+        r1 = bluenoise().b;
     }
 
     float z = r0 * 2.0 - 1.0;
@@ -261,11 +277,14 @@ Ray scatter(Ray ray, HitInfo hitinfo, inout float specular) {
         specular_chance = bluenoise().r;
     }
 
-    specular = (specular_chance < hitinfo.material.specular_percentage) ? 1.0 : 0.0;
+    float specular_percentage = 0.0;
+    float roughness = 0.0;
+
+    specular = (specular_chance < specular_percentage) ? 1.0 : 0.0;
 
     vec3 diffuse_ray_dir = normalize(hitinfo.normal + random_in_unit_sphere());
     vec3 specular_ray_dir = reflect(ray.dir, hitinfo.normal);
-    specular_ray_dir = normalize(mix(specular_ray_dir, diffuse_ray_dir, hitinfo.material.roughness * hitinfo.material.roughness));
+    specular_ray_dir = normalize(mix(specular_ray_dir, diffuse_ray_dir, roughness * roughness));
 
     vec3 new_dir = mix(diffuse_ray_dir, specular_ray_dir, specular);
 
@@ -285,60 +304,25 @@ Ray generate_ray(vec2 pos) {
 }
 
 /*
-    Cast the ray into the scene and gather collided objects.
-*/
-HitInfo cast_ray(Ray ray, Sphere[6] spheres, Triangle[22] tris, int skip_i) {
-    float min_depth = BIG_VALUE;
-    HitInfo min_hitinfo = HitInfo(false, vec3(0.0), vec3(0.0), Material(vec3(0.0), vec3(0.0), 0, vec3(0.0), 0.0));
-    
-    for (int i = 0; i < 6; i++) {
-        if (i == skip_i) {continue;}
-
-        HitInfo hitinfo = sphere_x_ray(spheres[i], ray);
-
-        if (hitinfo.hit) {
-            float dist = distance(hitinfo.point, ray.origin);
-
-            if (dist < min_depth) {
-                min_depth = dist;
-                min_hitinfo = hitinfo;
-            }
-        }
-    }
-
-    for (int i = 0; i < 22; i++) {
-        if (i == skip_i) {continue;}
-
-        HitInfo hitinfo = triangle_x_ray(tris[i], ray);
-
-        if (hitinfo.hit) {
-            float dist = distance(hitinfo.point, ray.origin);
-
-            if (dist < min_depth) {
-                min_depth = dist;
-                min_hitinfo = hitinfo;
-            }
-        }
-    }
-
-    return min_hitinfo;
-}
-
-/*
     Path-trace a single ray and gather radiance information.
 */
-vec3 pathtrace(Ray ray, Sphere[6] spheres, Triangle[22] tris) {
+vec3 pathtrace(Ray ray) {
     vec3 radiance = vec3(0.0); // Final ray color
     vec3 radiance_delta = vec3(1.0); // Accumulated multiplier
 
     for (int bounce = 0; bounce < u_bounces; bounce++) {
         
-        HitInfo hitinfo = cast_ray(ray, spheres, tris, -1);
+        HitInfo hitinfo = dda(ray);
 
         // Ray did not hit anything, sample sky
         if (!hitinfo.hit) {
-            //vec3 sky_color = srgb_to_rgb_approx(texture(s_sky, uv_project_sphere(nray.dir)).rgb);
-            vec3 sky_color = vec3(0.0);
+            vec3 sky_color = texture(s_sky, uv_project_sphere(ray.dir)).rgb;
+
+            // Sky texture is already tonemapped
+            sky_color = pow(sky_color, vec3(2.2));
+
+            sky_color *= 0.3;
+
             radiance += sky_color * radiance_delta;
             break;
         }
@@ -346,8 +330,30 @@ vec3 pathtrace(Ray ray, Sphere[6] spheres, Triangle[22] tris) {
         float specular = 0.0;
         ray = scatter(ray, hitinfo, specular);
 
-        radiance += hitinfo.material.emissive * radiance_delta;
-        radiance_delta *= mix(hitinfo.material.color, hitinfo.material.specular_color, specular);
+        vec3 specular_color = vec3(1.0);
+
+        /*
+            0 -> top
+            1 -> bottom
+            2 -> side
+        */
+        float surface = 0.0;
+        if (hitinfo.normal.y > 0.0) surface = 0.0;
+        else if (hitinfo.normal.y < 0.0) surface = 1.0;
+        else surface = 2.0;
+
+        float atlas_w = 1.0 / 3.0;
+        float atlas_h = 1.0 / 4.0;
+
+        vec2 atlas_uv = hitinfo.face_uv;
+        atlas_uv.x = atlas_uv.x * atlas_w + float(surface) * atlas_w;
+        atlas_uv.y = atlas_uv.y * atlas_h + float(hitinfo.block_id - 1) * atlas_h;
+
+        vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
+        vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * 3.0;
+
+        radiance += emissive * radiance_delta;
+        radiance_delta *= mix(albedo, specular_color, specular);
 
         // /*
         //     Russian Roulette:
@@ -372,182 +378,28 @@ vec3 pathtrace(Ray ray, Sphere[6] spheres, Triangle[22] tris) {
 void main() {
     vec3 final_radiance = vec3(0.0);
 
-    // Generate scene
-    Sphere[6] spheres = Sphere[](
-        Sphere(
-            vec3(-10.5, 0.0, 35.0),
-            3.0,
-            Material(vec3(1.0), vec3(0.0), 1.0, vec3(0.3, 0.1, 0.8), 0.0)
-        ),
-        Sphere(
-            vec3(-3.5, 0.0, 35.0),
-            3.0,
-            Material(vec3(1.0), vec3(0.0), 1.0, vec3(0.3, 0.1, 0.8), 0.333)
-        ),
-        Sphere(
-            vec3(3.5, 0.0, 35.0),
-            3.0,
-            Material(vec3(1.0), vec3(0.0), 1.0, vec3(0.3, 0.1, 0.8), 0.667)
-        ),
-        Sphere(
-            vec3(10.5, 0.0, 35.0),
-            3.0,
-            Material(vec3(1.0), vec3(0.0), 1.0, vec3(0.3, 0.1, 0.8), 1.0)
-        ),
-
-        Sphere(
-            vec3(0.0, 13.0, 35.0),
-            3.0,
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
-        ),
-
-        Sphere(
-            vec3(0.0, 14.0, 25.0),
-            1.0,
-            Material(vec3(0.0), vec3(1.0) * 2.0, 0.0, vec3(0.0), 0.0)
-        )
-    );
-
-    Quad[11] quads = Quad[](
-        // Floor
-        Quad(
-            vec3(-15.0, -15.0, 45.0),
-            vec3( 15.0, -15.0, 45.0),
-            vec3( 15.0, -15.0, 15.0),
-            vec3(-15.0, -15.0, 15.0),
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
-        ),
-
-        // Ceiling
-        Quad(
-            vec3(-15.0, 15.0, 45.0),
-            vec3( 15.0, 15.0, 45.0),
-            vec3( 15.0, 15.0, 15.0),
-            vec3(-15.0, 15.0, 15.0),
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.5), 0.1)
-        ),
-
-        // Back wall
-        Quad(
-            vec3(-15.0, -15.0, 45.0),
-            vec3( 15.0, -15.0, 45.0),
-            vec3( 15.0,  15.0, 45.0),
-            vec3(-15.0,  15.0, 45.0),
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
-        ),
-
-        // Front wall
-        Quad(
-            vec3(-15.0, -15.0, 15.0),
-            vec3( 15.0, -15.0, 15.0),
-            vec3( 15.0,  -15.0, 15.0),
-            vec3(-15.0,  -15.0, 15.0),
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
-        ),
-
-        // Left wall
-        Quad(
-            vec3(15.0, -15.0, 45.0),
-            vec3(15.0, -15.0, 15.0),
-            vec3(15.0,  15.0, 15.0),
-            vec3(15.0,  15.0, 45.0),
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
-        ),
-
-        // Right wall
-        Quad(
-            vec3(-15.0, -15.0, 45.0),
-            vec3(-15.0, -15.0, 15.0),
-            vec3(-15.0,  15.0, 15.0),
-            vec3(-15.0,  15.0, 45.0),
-            Material(vec3(1.0), vec3(0.0), 0.0, vec3(0.0), 0.0)
-        ),
-
-        // Light
-        Quad(
-            vec3(-13.0, -15.0, 44.9),
-            vec3( -11.0, -15.0, 44.9),
-            vec3( -11.0,  15.0, 44.9),
-            vec3(-13.0,  15.0, 44.9),
-            Material(vec3(0.0), vec3(1.0, 0.0, 0.0) * 4.0, 0.0, vec3(0.0), 0.0)
-        ),
-
-        Quad(
-            vec3(-7.0, -15.0,  44.9),
-            vec3( -5.0, -15.0, 44.9),
-            vec3( -5.0,  15.0, 44.9),
-            vec3(-7.0,  15.0,  44.9),
-            Material(vec3(0.0), vec3(1.0, 0.5, 0.0) * 4.0, 0.0, vec3(0.0), 0.0)
-        ),
-
-        Quad(
-            vec3(-1.0, -15.0, 44.9),
-            vec3( 1.0, -15.0, 44.9),
-            vec3( 1.0,  15.0, 44.9),
-            vec3(-1.0,  15.0, 44.9),
-            Material(vec3(0.0), vec3(0.0, 1.0, 0.0) * 4.0, 0.0, vec3(0.0), 0.0)
-        ),
-
-        Quad(
-            vec3(5.0, -15.0, 44.9),
-            vec3(7.0, -15.0, 44.9),
-            vec3(7.0,  15.0, 44.9),
-            vec3(5.0,  15.0, 44.9),
-            Material(vec3(0.0), vec3(0.0, 0.5, 1.0) * 4.0, 0.0, vec3(0.0), 0.0)
-        ),
-
-        Quad(
-            vec3(13.0, -15.0, 44.9),
-            vec3(11.0, -15.0, 44.9),
-            vec3(11.0,  15.0, 44.9),
-            vec3(13.0,  15.0, 44.9),
-            Material(vec3(0.0), vec3(0.5, 0.0, 1.0) * 4.0, 0.0, vec3(0.0), 0.0)
-        )
-    );
-
-    // Calculate triangles from quads
-    Triangle[22] tris;
-    int j = 0;
-    for (int i = 0; i < 22; i += 2) {
-        Triangle tri0 = Triangle(quads[j].v0, quads[j].v1, quads[j].v2, vec3(0.0), quads[j].material);
-        Triangle tri1 = Triangle(quads[j].v2, quads[j].v3, quads[j].v0, vec3(0.0), quads[j].material);
-        tri0.normal = normalize(cross(tri0.v1 - tri0.v0, tri0.v2 - tri0.v0));
-        tri1.normal = normalize(cross(tri1.v1 - tri1.v0, tri1.v2 - tri1.v0));
-        tris[i] = tri0;
-        tris[i + 1] = tri1;
-        j++;
-    }
-
-    // prng_state = wang_hash(
-    //     uint(v_uv.x * u_resolution.x) * 73856093u ^
-    //     uint(v_uv.y * u_resolution.y) * 19349663u
-    // );
-
     vec2 pixel = v_uv * u_resolution;
 
     bluenoise_seed = v_uv;
-    bluenoise_counter = 0;
 
     float u_ray_countf = float(u_ray_count);
-    for (int i = 0; i < u_ray_count; i++) {
-        current_sample_idx = i;
+    for (int sample_i = 0; sample_i < u_ray_count; sample_i++) {
+        prng_state = wang_hash(
+            uint(pixel.x) * 1973u +
+            uint(pixel.y) * 9277u +
+            uint(sample_i) * 26699u
+        );
 
-        uint s = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + uint(i) * 26699u;
-        prng_state = wang_hash(s);
+        Ray ray = generate_ray(v_uv * 2.0 - 1.0);
 
-        // Anti-aliasing
-        // float rx = (prng(prng_state) * 2.0 - 1.0) / 790.0;
-        // float ry = (prng(prng_state) * 2.0 - 1.0) / 790.0;
-        // vec2 pos = v_uv * 2.0 - 1.0 + vec2(rx, ry);
+        vec3 radiance = pathtrace(ray);
 
-        vec2 pos = v_uv * 2.0 - 1.0;
-
-        Ray ray = generate_ray(pos);
-
-        vec3 radiance = pathtrace(ray, spheres, tris);
-        
         final_radiance += radiance / u_ray_countf;
     }
+
+    // if (v_uv.x > 0.5) {
+    //     final_radiance = texture(s_emissive_atlas, vec2((v_uv.x + 0.5) * 2.0, v_uv.y)).rgb;
+    // }
 
     f_color = vec4(final_radiance, 1.0);
 }
