@@ -12,6 +12,8 @@
     upscale.fsh
     -----------
     Upscaling shader.
+
+    It also overlays the UI texture as a final composite.
 */
 
 #version 460
@@ -20,6 +22,7 @@ in vec2 v_uv;
 out vec4 f_color;
 
 uniform sampler2D s_texture;
+uniform sampler2D s_overlay;
 
 /*
     Bicubic sampling from https://www.shadertoy.com/view/msj3zw
@@ -72,7 +75,11 @@ vec4 textureBicubic(sampler2D tex, vec2 uv){
 
 
 void main() {
-    vec3 color = textureBicubic(s_texture, v_uv).rgb;
+    vec3 base = textureBicubic(s_texture, v_uv).rgb;
+    vec4 overlay = texture(s_overlay, v_uv);
+    
+    // Source-over alpha blending
+    vec3 color = mix(base.rgb, overlay.rgb, overlay.a);
 
     f_color = vec4(color, 1.0);
 }

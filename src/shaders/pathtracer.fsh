@@ -22,9 +22,7 @@
 #define EPSILON 0.0005
 #define BIG_VALUE 10000.0
 #define BLUENOISE_SIZE 1024
-#define VOXEL_SIZE 5.0
-#define MAX_DDA_STEPS 34
-#define GRID_SIZE 10
+#define MAX_DDA_STEPS 56
 
 
 in vec2 v_uv;
@@ -35,6 +33,8 @@ uniform int u_ray_count;
 uniform int u_bounces;
 uniform int u_noise_method;
 uniform vec2 u_resolution;
+uniform float u_voxel_size;
+uniform bool u_enable_roulette;
 
 uniform sampler2D s_bluenoise;
 uniform sampler3D s_grid;
@@ -54,44 +54,18 @@ uniform Camera u_camera;
 
 
 struct Ray {
-    vec3 origin;
-    vec3 dir;
-};
-
-struct Material {
-    vec3 color;
-    vec3 emissive;
-    float specular_percentage;
-    vec3 specular_color;
-    float roughness;
+    vec3 origin; // Origin of ray in world space
+    vec3 dir; // Normalized direction of ray
 };
 
 struct HitInfo {
     bool hit; // Collision with ray happened?
     vec3 point; // Collision point on the surface in world space
     vec3 normal; // Normal of the collision surface
-    int block_id;
-    vec2 face_uv;
-    //Material material;
+    int block_id; // ID of the block type
+    vec2 face_uv; // Local UV coordinate on the hit face
 };
 
-
-bool out_of_grid(vec3 voxel) {
-    float size = float(GRID_SIZE);
-
-    return (voxel.x < 0.0 || voxel.y < 0.0 || voxel.z < 0.0 ||
-            voxel.x >= size || voxel.y >= size || voxel.z >= size);
-}
-
-bool is_solid(vec3 voxel) {
-    vec4 s = texelFetch(s_grid, ivec3(voxel), 0);
-
-    if (s.r > 0.0) {
-        return true;
-    }
-
-    return false;
-}
 
 vec3 sign_vec3(vec3 v) {
     return vec3(
@@ -101,6 +75,7 @@ vec3 sign_vec3(vec3 v) {
     );
 }
 
+
 HitInfo dda(Ray ray) {
     HitInfo hitinfo = HitInfo(
         false,
@@ -108,10 +83,9 @@ HitInfo dda(Ray ray) {
         vec3(0.0),
         0,
         vec2(0.0)
-        //Material(vec3(1.0, 1.0, 1.0), vec3(0.0), 1.0, vec3(1.0), 0.2)
     );
 
-    vec3 voxel = ray.origin / VOXEL_SIZE;
+    vec3 voxel = ray.origin / u_voxel_size;
     voxel.x = floor(voxel.x);
     voxel.y = floor(voxel.y);
     voxel.z = floor(voxel.z);
@@ -119,9 +93,9 @@ HitInfo dda(Ray ray) {
     vec3 step_dir = sign_vec3(ray.dir);
 
     vec3 next_boundary = vec3(
-        (voxel.x + (step_dir.x > 0.0 ? 1.0 : 0.0)) * VOXEL_SIZE,
-        (voxel.y + (step_dir.y > 0.0 ? 1.0 : 0.0)) * VOXEL_SIZE,
-        (voxel.z + (step_dir.z > 0.0 ? 1.0 : 0.0)) * VOXEL_SIZE
+        (voxel.x + (step_dir.x > 0.0 ? 1.0 : 0.0)) * u_voxel_size,
+        (voxel.y + (step_dir.y > 0.0 ? 1.0 : 0.0)) * u_voxel_size,
+        (voxel.z + (step_dir.z > 0.0 ? 1.0 : 0.0)) * u_voxel_size
     );
 
     vec3 t_max = next_boundary - ray.origin;
@@ -134,15 +108,15 @@ HitInfo dda(Ray ray) {
 
     vec3 t_delta = vec3(0.0);
     if (ray.dir.x == 0.0) t_delta.x = BIG_VALUE;
-    else t_delta.x = abs(VOXEL_SIZE / ray.dir.x);
+    else t_delta.x = abs(u_voxel_size / ray.dir.x);
     if (ray.dir.y == 0.0) t_delta.y = BIG_VALUE;
-    else t_delta.y = abs(VOXEL_SIZE / ray.dir.y);
+    else t_delta.y = abs(u_voxel_size / ray.dir.y);
     if (ray.dir.z == 0.0) t_delta.z = BIG_VALUE;
-    else t_delta.z = abs(VOXEL_SIZE / ray.dir.z);
+    else t_delta.z = abs(u_voxel_size / ray.dir.z);
 
-    // Traverse
+    // Traverse world texture
     for (int i = 0; i < MAX_DDA_STEPS; i++) {
-        // ray can start out of the map
+        // Ray can start out of the map, find a different solution 
         // if (out_of_grid(voxel)) {
         //     return false;
         // }
@@ -169,28 +143,21 @@ HitInfo dda(Ray ray) {
         if (voxel_sample.r > 0.0) {
             hitinfo.hit = true;
 
-            // if (voxel.y > 0.0) {
-            //     hitinfo.material.emissive = vec3(1.0) * 1.5;
-            // }
-
             hitinfo.point = ray.origin + ray.dir * hit_t;
 
             hitinfo.block_id = int(voxel_sample.r * 255.0);
 
             // WHY DID DIVIDING BY VOXEL SIZE WORK
-            vec3 local = fract(hitinfo.point / VOXEL_SIZE);
+            vec3 local = fract(hitinfo.point / u_voxel_size);
 
-            // Project onto correct plane (branchless)
+            // Project onto correct plane
             vec3 abs_n = abs(hitinfo.normal);
             hitinfo.face_uv = local.yz * abs_n.x + local.xz * abs_n.y + local.xy * abs_n.z;
 
-            // TODO: WTF IS HAPPENING HERE?
-            vec2 uv = hitinfo.face_uv;
-            uv = mix(uv, uv.yx, abs_n.x); // swap axes for X faces
-            uv.x = mix(uv.x, 1.0 - uv.x, step(0.0, hitinfo.normal.z));
-            uv.y = mix(uv.y, uv.y, step(0.0, -hitinfo.normal.y));
-
-            hitinfo.face_uv = uv;
+            // TODO: WHAT IS HAPPENING HERE?
+            hitinfo.face_uv = mix(hitinfo.face_uv, hitinfo.face_uv.yx, abs_n.x); // swap axes for X faces
+            hitinfo.face_uv.x = mix(hitinfo.face_uv.x, 1.0 - hitinfo.face_uv.x, step(0.0, hitinfo.normal.z));
+            hitinfo.face_uv.y = mix(hitinfo.face_uv.y, hitinfo.face_uv.y, step(0.0, -hitinfo.normal.y));
 
             break;
         }
@@ -239,13 +206,26 @@ float prng() {
     return float((z ^ (z >> 14))) / 4294967296.0;
 }
 
+/*
+    Bluenoise PRNG.
+    Returns a float in range 0 and 1.
+
+    Works for 1 ray/pixel, but either breaks or doesn't converge above that
+    because doesn't have temporal properties or a major skill issue on my part.
+*/
 vec2 bluenoise_seed;
-vec4 bluenoise() {
-    vec4 bluenoise_sample = texture(s_bluenoise, (bluenoise_seed * u_resolution) / vec2(BLUENOISE_SIZE, BLUENOISE_SIZE));
-    return fract(bluenoise_sample);
+int bluenoise_counter;
+float bluenoise() {
+    vec2 pixel = bluenoise_seed * u_resolution;
+    vec4 bluenoise_sample = texture(s_bluenoise, pixel / vec2(BLUENOISE_SIZE, BLUENOISE_SIZE));
+    float r = bluenoise_sample[bluenoise_counter%4];
+    bluenoise_counter++;
+    return r;
 }
 
-
+/*
+    Generate a random vector in unit sphere.
+*/
 vec3 random_in_unit_sphere() {
     float r0 = 0.0;
     float r1 = 0.0;
@@ -254,8 +234,8 @@ vec3 random_in_unit_sphere() {
         r1 = prng();
     }
     else if (u_noise_method == 2) {
-        r0 = bluenoise().g;
-        r1 = bluenoise().b;
+        r0 = bluenoise();
+        r1 = bluenoise();
     }
 
     float z = r0 * 2.0 - 1.0;
@@ -266,7 +246,10 @@ vec3 random_in_unit_sphere() {
     return vec3(x, y, z);
 }
 
-Ray scatter(Ray ray, HitInfo hitinfo, inout float specular) {
+/*
+    Scatter the ray according to the surface material.
+*/
+Ray brdf(Ray ray, HitInfo hitinfo, inout float specular) {
     vec3 new_pos = hitinfo.point + hitinfo.normal * EPSILON;
 
     float specular_chance = 0.0;
@@ -274,8 +257,10 @@ Ray scatter(Ray ray, HitInfo hitinfo, inout float specular) {
         specular_chance = prng();
     }
     else if (u_noise_method == 2) {
-        specular_chance = bluenoise().r;
+        specular_chance = bluenoise();
     }
+
+    // TODO: Metallics...
 
     float specular_percentage = 0.0;
     float roughness = 0.0;
@@ -321,14 +306,12 @@ vec3 pathtrace(Ray ray) {
             // Sky texture is already tonemapped
             sky_color = pow(sky_color, vec3(2.2));
 
-            sky_color *= 0.3;
-
             radiance += sky_color * radiance_delta;
             break;
         }
 
         float specular = 0.0;
-        ray = scatter(ray, hitinfo, specular);
+        ray = brdf(ray, hitinfo, specular);
 
         vec3 specular_color = vec3(1.0);
 
@@ -355,20 +338,20 @@ vec3 pathtrace(Ray ray) {
         radiance += emissive * radiance_delta;
         radiance_delta *= mix(albedo, specular_color, specular);
 
-        // /*
-        //     Russian Roulette:
-        //     As the throughput gets smaller, the ray is more likely to get terminated early.
-        //     Survivors have their value boosted to make up for fewer samples being in the average.
-        // */
-        // if (u_roulette) {
-        //     float roulette_result = max(ray_color.r, max(ray_color.g, ray_color.b));
-        //     if (prng(prng_state) > roulette_result) {
-        //         break;
-        //     }
+        /*
+            Russian Roulette:
+            As the throughput gets smaller, the ray is more likely to get terminated early.
+            Survivors have their value boosted to make up for fewer samples being in the average.
+        */
+        if (u_enable_roulette) {
+            float roulette_result = max(radiance_delta.r, max(radiance_delta.g, radiance_delta.b));
+            if (prng() > roulette_result) {
+                break;
+            }
         
-        //     // Add the energy we 'lose' by randomly terminating paths
-        //     ray_color *= 1.0 / roulette_result;
-        // }
+            // Add the energy we 'lose' by randomly terminating paths
+            radiance_delta *= 1.0 / roulette_result;
+        }
     }
 
     return radiance;
@@ -381,6 +364,7 @@ void main() {
     vec2 pixel = v_uv * u_resolution;
 
     bluenoise_seed = v_uv;
+    bluenoise_counter = 0;
 
     float u_ray_countf = float(u_ray_count);
     for (int sample_i = 0; sample_i < u_ray_count; sample_i++) {
@@ -396,10 +380,6 @@ void main() {
 
         final_radiance += radiance / u_ray_countf;
     }
-
-    // if (v_uv.x > 0.5) {
-    //     final_radiance = texture(s_emissive_atlas, vec2((v_uv.x + 0.5) * 2.0, v_uv.y)).rgb;
-    // }
 
     f_color = vec4(final_radiance, 1.0);
 }

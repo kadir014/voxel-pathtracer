@@ -9,9 +9,12 @@
 """
 
 from array import array
+from time import perf_counter
 
 import pygame
 import moderngl
+
+from src.world import BLOCK_IDS, VoxelWorld
 
 
 class RendererSettings:
@@ -90,6 +93,14 @@ class RendererSettings:
     def noise_method(self, value: int) -> None:
         self.__renderer._pt_program["u_noise_method"].value = value
 
+    @property
+    def russian_roulette(self) -> int:
+        return self.__renderer._pt_program["u_enable_roulette"].value
+    
+    @russian_roulette.setter
+    def russian_roulette(self, value: int) -> None:
+        self.__renderer._pt_program["u_enable_roulette"].value = value
+
 
 class Renderer:
     """
@@ -98,10 +109,12 @@ class Renderer:
 
     def __init__(self,
             resolution: tuple[int, int],
-            logical_resolution: tuple[int, int]
+            logical_resolution: tuple[int, int],
+            world: VoxelWorld
             ) -> None:
-        self.resolution = resolution
-        self.logical_resolution = logical_resolution
+        self._world = world
+        self._resolution = resolution
+        self._logical_resolution = logical_resolution
 
         self._context = moderngl.create_context()
 
@@ -129,7 +142,6 @@ class Renderer:
             vertex_shader=base_vertex_shader,
             fragment_shader=open("src/shaders/post.fsh").read()
         )
-
         self._post_program["u_enable_post"] = True
         self._post_program["u_tonemapper"] = 1
         self._post_program["u_exposure"] = -1.993
@@ -150,7 +162,6 @@ class Renderer:
             vertex_shader=base_vertex_shader,
             fragment_shader=open("src/shaders/pathtracer.fsh").read()
         )
-
         self._pt_program["s_bluenoise"] = 0
         self._pt_program["s_grid"] = 1
         self._pt_program["s_sky"] = 2
@@ -159,7 +170,9 @@ class Renderer:
         self._pt_program["u_ray_count"] = 8
         self._pt_program["u_bounces"] = 2
         self._pt_program["u_noise_method"] = 1
-        self._pt_program["u_resolution"] = self.logical_resolution
+        self._pt_program["u_enable_roulette"] = True
+        self._pt_program["u_resolution"] = self._logical_resolution
+        self._pt_program["u_voxel_size"] = self._world.voxel_size
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -174,6 +187,8 @@ class Renderer:
             vertex_shader=base_vertex_shader,
             fragment_shader=open("src/shaders/upscale.fsh").read()
         )
+        self._upscale_program["s_texture"] = 0
+        self._upscale_program["s_overlay"] = 1
 
         self._upscale_vao = self._context.vertex_array(
             self._upscale_program,
@@ -195,13 +210,17 @@ class Renderer:
         self._bluenoise_texture.repeat_y = True
 
         # Note: data type being f4 lets us store colors in HDR
-        self._pathtracer_target_texture = self._context.texture(self.logical_resolution, 3, dtype="f4")
+        self._pathtracer_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f4")
         self._pathtracer_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self._pathtracer_fbo = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture,))
 
-        self._post_target_texture = self._context.texture(self.logical_resolution, 3, dtype="f1")
+        self._post_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
         self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._post_fbo = self._context.framebuffer(color_attachments=(self._post_target_texture,))
+
+
+        self.settings = RendererSettings(self)
+
 
         sky_surf = pygame.image.load("data/qwantani_dusk_2_puresky.png")
         self._sky_texture = self._context.texture(
@@ -213,31 +232,25 @@ class Renderer:
         self._sky_texture.repeat_x = True
         self._sky_texture.repeat_y = True
 
-        self.grid_size = (10, 10, 10) # x, y, z
-        self._voxel_tex = self._context.texture3d(self.grid_size, 1)
+        self._voxel_tex = self._context.texture3d(self._world.dimensions, 1)
         self._voxel_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
-        self.grid = {}
-        for y in range(self.grid_size[1]):
-            for z in range(self.grid_size[2]):
-                for x in range(self.grid_size[0]):
-                    self.grid[(x, y, z)] = 0
 
-        self.settings = RendererSettings(self)
+        self.ui_surface = pygame.Surface(self._resolution, pygame.SRCALPHA)
+        self.ui_surface.fill((0, 0, 0, 0))
+        self.ui_texture = self._context.texture(self._resolution, 4)
+
+        crosshair_surf = pygame.image.load("data/crosshair.png")
+        crosshair_pos = (self._resolution[0]*0.5, self._resolution[1]*0.5)
+        self.ui_surface.blit(crosshair_surf, crosshair_surf.get_rect(center=crosshair_pos))
+
+        self.update_ui_texture()
 
 
-        self.block_size = (16, 16)
-
-        self.block_order = (
-            None, # 0 is air
-            "cobblestone",
-            "dirt",
-            "glowstone",
-            "grass"
-        )
+        self.block_texture_size = (16, 16)
 
         self.block_textures = {
-            None: pygame.Surface(self.block_size),
+            None: pygame.Surface(self.block_texture_size),
             "cobblestone": pygame.image.load("data/blocks/cobblestone.png"),
             "dirt": pygame.image.load("data/blocks/dirt.png"),
             "glowstone": pygame.image.load("data/blocks/glowstone.png"),
@@ -274,22 +287,27 @@ class Renderer:
 
         dtype = "f" if isinstance(data[0], float) else "I"
         return self._context.buffer(array(dtype, data))
+    
+    def update_ui_texture(self) -> None:
+        self.ui_texture.write(pygame.image.tobytes(self.ui_surface, "RGBA", True))
 
-    def update_grid(self) -> None:
+    def update_grid_texture(self) -> None:
+        start = perf_counter()
+
         layers = []
-        for layer_i in range(self.grid_size[1]):
-            surf = pygame.Surface((self.grid_size[0], self.grid_size[2]))
+        for layer_i in range(self._world.dimensions[1]):
+            surf = pygame.Surface((self._world.dimensions[0], self._world.dimensions[2]))
             layers.append(surf)
 
             # z -> layer_i
             # x -> x
             # y = height - y
 
-            for y in range(self.grid_size[1]):
-                for x in range(self.grid_size[0]):
-                    voxel = self.grid[x, y, layer_i]
+            for y in range(self._world.dimensions[1]):
+                for x in range(self._world.dimensions[0]):
+                    voxel = self._world[x, y, layer_i]
 
-                    surf.set_at((x, (self.grid_size[1] - 1) - y), (voxel, voxel, voxel))
+                    surf.set_at((x, (self._world.dimensions[1] - 1) - y), (voxel, voxel, voxel))
 
         data = bytearray()
         for layer in layers:
@@ -301,6 +319,9 @@ class Renderer:
 
         self._voxel_tex.write(data)
 
+        elapsed = perf_counter() - start
+        print(f"Updated grid in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+
     def generate_block_atlas_texture(self) -> None:
         # atlas -> 3xN
         # N is the amount of block variants
@@ -309,13 +330,13 @@ class Renderer:
         n_blocks = len(self.block_atlas)
 
         self.block_atlas_tex = self._context.texture(
-            (self.block_size[0] * 3, self.block_size[1] * n_blocks),
+            (self.block_texture_size[0] * 3, self.block_texture_size[1] * n_blocks),
             3
         )
         self.block_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
         print(f"Block atlas size: {self.block_atlas_tex.width}x{self.block_atlas_tex.height}")
 
-        for i, block_variant in enumerate(self.block_order):
+        for i, block_variant in enumerate(BLOCK_IDS):
             if block_variant is None: continue
 
             top_surf = self.block_textures[self.block_atlas[block_variant][0]]
@@ -328,28 +349,28 @@ class Renderer:
             self.block_atlas_tex.write(
                 top_data,
                 viewport=(
-                    self.block_size[0] * 0,
-                    self.block_size[1] * (i-1),
-                    self.block_size[0],
-                    self.block_size[1]
+                    self.block_texture_size[0] * 0,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
                 )
             )
             self.block_atlas_tex.write(
                 bottom_data,
                 viewport=(
-                    self.block_size[0] * 1,
-                    self.block_size[1] * (i-1),
-                    self.block_size[0],
-                    self.block_size[1]
+                    self.block_texture_size[0] * 1,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
                 )
             )
             self.block_atlas_tex.write(
                 side_data,
                 viewport=(
-                    self.block_size[0] * 2,
-                    self.block_size[1] * (i-1),
-                    self.block_size[0],
-                    self.block_size[1]
+                    self.block_texture_size[0] * 2,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
                 )
             )
     
@@ -357,13 +378,13 @@ class Renderer:
         n_blocks = len(self.block_atlas)
 
         self.emissive_atlas_tex = self._context.texture(
-            (self.block_size[0] * 3, self.block_size[1] * n_blocks),
+            (self.block_texture_size[0] * 3, self.block_texture_size[1] * n_blocks),
             3
         )
         self.emissive_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
         print(f"Emissive atlas size: {self.emissive_atlas_tex.width}x{self.emissive_atlas_tex.height}")
 
-        for i, block_variant in enumerate(self.block_order):
+        for i, block_variant in enumerate(BLOCK_IDS):
             if block_variant is None: continue
 
             top_surf = self.block_textures[self.emissive_atlas[block_variant][0]]
@@ -376,28 +397,28 @@ class Renderer:
             self.emissive_atlas_tex.write(
                 top_data,
                 viewport=(
-                    self.block_size[0] * 0,
-                    self.block_size[1] * (i-1),
-                    self.block_size[0],
-                    self.block_size[1]
+                    self.block_texture_size[0] * 0,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
                 )
             )
             self.emissive_atlas_tex.write(
                 bottom_data,
                 viewport=(
-                    self.block_size[0] * 1,
-                    self.block_size[1] * (i-1),
-                    self.block_size[0],
-                    self.block_size[1]
+                    self.block_texture_size[0] * 1,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
                 )
             )
             self.emissive_atlas_tex.write(
                 side_data,
                 viewport=(
-                    self.block_size[0] * 2,
-                    self.block_size[1] * (i-1),
-                    self.block_size[0],
-                    self.block_size[1]
+                    self.block_texture_size[0] * 2,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
                 )
             )
 
@@ -418,4 +439,5 @@ class Renderer:
 
         self._context.screen.use()
         self._post_target_texture.use(0)
+        self.ui_texture.use(1)
         self._upscale_vao.render()

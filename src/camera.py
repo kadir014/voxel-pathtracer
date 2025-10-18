@@ -33,6 +33,8 @@ class Camera:
         self.focal_length = 0.15
         self.horizontal_size = 0.16
 
+        self.__pitch = 0
+
         self.update()
 
     def update(self) -> None:
@@ -59,7 +61,7 @@ class Camera:
         """ Strafe horizontally. """
 
         delta = (self.look_at - self.position).normalize()
-        delta = delta.cross(pygame.Vector3(0.0, 1.0, 0.0)) * amount
+        delta = delta.cross(self.up).normalize() * amount
         self.position += delta
         self.look_at += delta
 
@@ -72,6 +74,21 @@ class Camera:
 
     def rotate_pitch(self, amount: float) -> None:
         """ Rotate camera vertically. """
+
+        self.__pitch += amount
+
+        upper_limit = 89.5
+        lower_limit = -89.5
+
+        if self.__pitch > upper_limit:
+            error = self.__pitch - upper_limit
+            self.__pitch -= error
+            amount -= error
+
+        if self.__pitch < lower_limit:
+            error = self.__pitch - lower_limit
+            self.__pitch -= error
+            amount -= error
 
         delta = self.look_at - self.position
         delta = delta.rotate(amount, self.up.cross(delta.normalize()))

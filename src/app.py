@@ -15,6 +15,7 @@ import pygame
 import imgui
 
 from src.camera import Camera
+from src.world import VoxelWorld
 from src.renderer import Renderer
 from src.gui import ImguiPygameModernGLAbomination
 
@@ -55,33 +56,28 @@ class App:
         target_fps
             Target framerate limit.
         """
-        self.resolution = resolution
-        self.logical_resolution = logical_resolution
 
-        pygame.display.set_mode(self.resolution, pygame.OPENGL | pygame.DOUBLEBUF)
+        self._resolution = resolution
+        self._logical_resolution = logical_resolution
+
+        pygame.display.set_mode(self._resolution, pygame.OPENGL | pygame.DOUBLEBUF)
         pygame.display.set_caption("Voxel Pathtracer Prototype  -  Pygame-CE & ModernGL")
         self.clock = pygame.time.Clock()
         self.target_fps = target_fps
 
-        self.camera = Camera(logical_resolution)
-
-        self.renderer = Renderer(self.resolution, self.logical_resolution)
-
-        self.gui = ImguiPygameModernGLAbomination(self.resolution, self.renderer._context)
+        self.camera = Camera(self._logical_resolution)
+        self.world = VoxelWorld((16, 16, 16))
+        self.renderer = Renderer(self._resolution, self._logical_resolution, self.world)
+        self.gui = ImguiPygameModernGLAbomination(self._resolution, self.renderer._context)
 
         self.is_running = False
 
-        # floor
-        for z in range(self.renderer.grid_size[2]):
-            for x in range(self.renderer.grid_size[0]):
-                self.renderer.grid[(x, 0, z)] = 4
-
-        self.renderer.update_grid()
+        self.renderer.update_grid_texture()
 
     @property
     def logical_scale(self) -> float:
         # Assumes aspect ratio is the same.
-        return self.logical_resolution[0] / self.resolution[0]
+        return self._logical_resolution[0] / self._resolution[0]
 
     def _update_camera_uniform(self) -> None:
         self.renderer._pt_program["u_camera.position"] = (
@@ -107,10 +103,9 @@ class App:
 
     def dda(self, origin: pygame.Vector3, dir: pygame.Vector3) -> HitInfo:
         # defined in shader
-        VOXEL_SIZE = 5.0
         MAX_DDA_STEPS = 34
         
-        voxel = origin / VOXEL_SIZE
+        voxel = origin / self.world.voxel_size
         voxel.x = floor(voxel.x)
         voxel.y = floor(voxel.y)
         voxel.z = floor(voxel.z)
@@ -118,9 +113,9 @@ class App:
         step = vec3_sign(dir)
 
         next_boundary = pygame.Vector3(
-            (voxel.x + (1.0 if step.x > 0.0 else 0.0)) * VOXEL_SIZE,
-            (voxel.y + (1.0 if step.y > 0.0 else 0.0)) * VOXEL_SIZE,
-            (voxel.z + (1.0 if step.z > 0.0 else 0.0)) * VOXEL_SIZE
+            (voxel.x + (1.0 if step.x > 0.0 else 0.0)) * self.world.voxel_size,
+            (voxel.y + (1.0 if step.y > 0.0 else 0.0)) * self.world.voxel_size,
+            (voxel.z + (1.0 if step.z > 0.0 else 0.0)) * self.world.voxel_size
         )
 
         t_max = next_boundary - origin
@@ -133,11 +128,11 @@ class App:
 
         t_delta = pygame.Vector3(0.0)
         if dir.x == 0.0: t_delta.x = float("inf")
-        else: t_delta.x = abs(VOXEL_SIZE / dir.x)
+        else: t_delta.x = abs(self.world.voxel_size / dir.x)
         if dir.y == 0.0: t_delta.y = float("inf")
-        else: t_delta.y = abs(VOXEL_SIZE / dir.y)
+        else: t_delta.y = abs(self.world.voxel_size / dir.y)
         if dir.z == 0.0: t_delta.z = float("inf")
-        else: t_delta.z = abs(VOXEL_SIZE / dir.z)
+        else: t_delta.z = abs(self.world.voxel_size / dir.z)
 
         normal = pygame.Vector3(0.0)
 
@@ -161,7 +156,8 @@ class App:
                 normal = pygame.Vector3(0.0, 0.0, -step.z)
 
             ivoxel = (int(voxel.x), int(voxel.y), int(voxel.z))
-            sample = self.renderer.grid[ivoxel]
+            if ivoxel not in self.world: continue
+            sample = self.world[ivoxel]
             if sample > 0:
                 return HitInfo(
                     True,
@@ -172,15 +168,11 @@ class App:
             
         return HitInfo(False, pygame.Vector3(), pygame.Vector3(), (0, 0, 0))
 
-
     def run(self) -> None:
         self.is_running = True
 
         pygame.mouse.set_relative_mode(True)
-
-        voxel_x = 0
-        voxel_y = 0
-        voxel_z = 0
+        mouse_sensitivity = 0.1
 
         while self.is_running:
             dt = self.clock.tick(self.target_fps) * 0.001
@@ -191,7 +183,28 @@ class App:
                     self.is_running = False
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    pass
+                    if not pygame.mouse.get_relative_mode(): continue
+
+                    if event.button == 1:
+                        block = 0
+                    elif event.button == 2: #middle
+                        block = 3
+                    elif event.button == 3:
+                        block = 1
+
+                    direction = (self.camera.look_at - self.camera.position).normalize()
+                    hitinfo = self.dda(self.camera.position, direction)
+
+                    voxel = pygame.Vector3(*hitinfo.voxel)
+                    
+                    if event.button != 1:
+                        voxel += hitinfo.normal
+
+                    ivoxel = (int(voxel.x), int(voxel.y), int(voxel.z))
+
+                    if hitinfo.hit:
+                        self.world[ivoxel] = block
+                        self.renderer.update_grid_texture()
 
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
@@ -199,42 +212,22 @@ class App:
 
                     elif event.key == pygame.K_LALT:
                         pygame.mouse.set_relative_mode(False)
-
-                    elif event.key == pygame.K_LEFT:
-                        voxel_x -= 1
-                    
-                    elif event.key == pygame.K_RIGHT:
-                        voxel_x += 1
-
-                    elif event.key == pygame.K_UP:
-                        voxel_y -= 1
-                    
-                    elif event.key == pygame.K_DOWN:
-                        voxel_y += 1
-
-                    elif event.key == pygame.K_o:
-                        voxel_z -= 1
-                    
-                    elif event.key == pygame.K_l:
-                        voxel_z += 1
-
-                    elif event.key == pygame.K_RETURN:
-                        self.renderer.grid[(voxel_x, voxel_y, voxel_z)] = 255
-                        self.renderer.update_grid()
                 
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_LALT:
                         pygame.mouse.set_relative_mode(True)
 
-            self.gui.process_events(events)
+            # Only process UI when mouse is enabled
+            # otherwise you can accidentally alter widgets when roaming around
+            if not pygame.mouse.get_relative_mode():
+                self.gui.process_events(events)
 
-            rx, ry = pygame.mouse.get_rel()
+            mouse_rel = pygame.Vector2(*pygame.mouse.get_rel())
 
             if pygame.mouse.get_relative_mode():
-                sx = -rx * 0.1
-                sy = ry * 0.1
-                self.camera.rotate_yaw(sx)
-                self.camera.rotate_pitch(sy)
+                rot = mouse_rel * mouse_sensitivity
+                self.camera.rotate_yaw(-rot.x)
+                self.camera.rotate_pitch(rot.y)
 
             keys = pygame.key.get_pressed()
 
@@ -271,9 +264,8 @@ class App:
             imgui.set_window_position(0, 0)
 
             imgui.text(f"FPS: {round(self.clock.get_fps())}")
-            imgui.text(f"Resolution: {self.resolution[0]}x{self.resolution[1]}")
-            imgui.text(f"Renderer: {self.logical_resolution[0]}x{self.logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
-            imgui.text(f"Voxel: {voxel_x}, {voxel_y}, {voxel_z}")
+            imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
+            imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
 
             if imgui.tree_node("Post-processing", imgui.TREE_NODE_DEFAULT_OPEN):
                 _, self.renderer.settings.postprocessing = imgui.checkbox("Enable post-processing", self.renderer.settings.postprocessing)
@@ -293,6 +285,8 @@ class App:
                 _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, 5)
                 noise_name = ("None", "Mulberry32", "Bluenoise")[self.renderer.settings.noise_method]
                 _, self.renderer.settings.noise_method = imgui.slider_int(f"Noise method", self.renderer.settings.noise_method, 0, 2, format=noise_name)
+                _, self.renderer.settings.russian_roulette = imgui.checkbox("Enable russian-roulette", self.renderer.settings.russian_roulette)
+
                 imgui.tree_pop()
 
             imgui.end()
