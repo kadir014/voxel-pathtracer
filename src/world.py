@@ -14,7 +14,8 @@ BLOCK_IDS = (
     "cobblestone",
     "dirt",
     "glowstone",
-    "grass"
+    "grass",
+    "iron_block"
 )
 
 

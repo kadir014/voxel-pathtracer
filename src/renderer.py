@@ -167,10 +167,12 @@ class Renderer:
         self._pt_program["s_sky"] = 2
         self._pt_program["s_albedo_atlas"] = 3
         self._pt_program["s_emissive_atlas"] = 4
+        self._pt_program["s_roughness_atlas"] = 5
+        self._pt_program["s_reflectivity_atlas"] = 6
         self._pt_program["u_ray_count"] = 8
-        self._pt_program["u_bounces"] = 2
+        self._pt_program["u_bounces"] = 3
         self._pt_program["u_noise_method"] = 1
-        self._pt_program["u_enable_roulette"] = True
+        self._pt_program["u_enable_roulette"] = False
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = self._world.voxel_size
 
@@ -257,14 +259,19 @@ class Renderer:
             "glowstone_emissive": pygame.image.load("data/blocks/glowstone.png"),
             "grass_top": pygame.image.load("data/blocks/grass_top.png"),
             "grass_side": pygame.image.load("data/blocks/grass_side.png"),
+            "iron_block": pygame.image.load("data/blocks/iron_block.png"),
+            "iron_block_roughness": pygame.image.load("data/blocks/iron_block_roughness.png"),
+            "iron_block_reflectivity": pygame.image.load("data/blocks/iron_block_reflectivity.png")
         }
 
+        # albedo atlas
         self.block_atlas = {
             # top bottom side
             "cobblestone": ("cobblestone", "cobblestone", "cobblestone"),
             "dirt": ("dirt", "dirt", "dirt"),
             "glowstone": ("glowstone", "glowstone", "glowstone"),
-            "grass": ("grass_top", "dirt", "grass_side")
+            "grass": ("grass_top", "dirt", "grass_side"),
+            "iron_block": ("iron_block", "iron_block", "iron_block")
         }
 
         self.emissive_atlas = {
@@ -272,12 +279,32 @@ class Renderer:
             "cobblestone": (None, None, None),
             "dirt": (None, None, None),
             "glowstone": ("glowstone_emissive", "glowstone_emissive", "glowstone_emissive"),
-            #"glowstone": (None, None, None),
-            "grass": (None, None, None)
+            "grass": (None, None, None),
+            "iron_block": (None, None, None)
+        }
+
+        self.roughness_atlas = {
+            # top bottom side
+            "cobblestone": (None, None, None),
+            "dirt": (None, None, None),
+            "glowstone": (None, None, None),
+            "grass": (None, None, None),
+            "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness")
+        }
+
+        self.reflectivity_atlas = {
+            # top bottom side
+            "cobblestone": (None, None, None),
+            "dirt": (None, None, None),
+            "glowstone": (None, None, None),
+            "grass": (None, None, None),
+            "iron_block": ("iron_block_reflectivity", "iron_block_reflectivity", "iron_block_reflectivity")
         }
 
         self.generate_block_atlas_texture()
         self.generate_emissive_atlas_texture()
+        self.generate_roughness_atlas_texture()
+        self.generate_reflectivity_atlas_texture()
 
     def __del__(self) -> None:
         self._context.release()
@@ -422,6 +449,102 @@ class Renderer:
                 )
             )
 
+    def generate_roughness_atlas_texture(self) -> None:
+        n_blocks = len(self.block_atlas)
+
+        self.roughness_atlas_tex = self._context.texture(
+            (self.block_texture_size[0] * 3, self.block_texture_size[1] * n_blocks),
+            3
+        )
+        self.roughness_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        print(f"Roughness atlas size: {self.roughness_atlas_tex.width}x{self.roughness_atlas_tex.height}")
+
+        for i, block_variant in enumerate(BLOCK_IDS):
+            if block_variant is None: continue
+
+            top_surf = self.block_textures[self.roughness_atlas[block_variant][0]]
+            bottom_surf = self.block_textures[self.roughness_atlas[block_variant][1]]
+            side_surf = self.block_textures[self.roughness_atlas[block_variant][2]]
+            top_data = pygame.image.tobytes(top_surf, "RGB", True)
+            bottom_data = pygame.image.tobytes(bottom_surf, "RGB", True)
+            side_data = pygame.image.tobytes(side_surf, "RGB", True)
+
+            self.roughness_atlas_tex.write(
+                top_data,
+                viewport=(
+                    self.block_texture_size[0] * 0,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+            self.roughness_atlas_tex.write(
+                bottom_data,
+                viewport=(
+                    self.block_texture_size[0] * 1,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+            self.roughness_atlas_tex.write(
+                side_data,
+                viewport=(
+                    self.block_texture_size[0] * 2,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+
+    def generate_reflectivity_atlas_texture(self) -> None:
+        n_blocks = len(self.block_atlas)
+
+        self.reflectivity_atlas_tex = self._context.texture(
+            (self.block_texture_size[0] * 3, self.block_texture_size[1] * n_blocks),
+            3
+        )
+        self.reflectivity_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        print(f"Reflectivity atlas size: {self.reflectivity_atlas_tex.width}x{self.reflectivity_atlas_tex.height}")
+
+        for i, block_variant in enumerate(BLOCK_IDS):
+            if block_variant is None: continue
+
+            top_surf = self.block_textures[self.reflectivity_atlas[block_variant][0]]
+            bottom_surf = self.block_textures[self.reflectivity_atlas[block_variant][1]]
+            side_surf = self.block_textures[self.reflectivity_atlas[block_variant][2]]
+            top_data = pygame.image.tobytes(top_surf, "RGB", True)
+            bottom_data = pygame.image.tobytes(bottom_surf, "RGB", True)
+            side_data = pygame.image.tobytes(side_surf, "RGB", True)
+
+            self.reflectivity_atlas_tex.write(
+                top_data,
+                viewport=(
+                    self.block_texture_size[0] * 0,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+            self.reflectivity_atlas_tex.write(
+                bottom_data,
+                viewport=(
+                    self.block_texture_size[0] * 1,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+            self.reflectivity_atlas_tex.write(
+                side_data,
+                viewport=(
+                    self.block_texture_size[0] * 2,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+
     def render(self) -> None:
         """ Render one frame. """
 
@@ -431,6 +554,8 @@ class Renderer:
         self._sky_texture.use(2)
         self.block_atlas_tex.use(3)
         self.emissive_atlas_tex.use(4)
+        self.roughness_atlas_tex.use(5)
+        self.reflectivity_atlas_tex.use(6)
         self._pt_vao.render()
 
         self._post_fbo.use()
@@ -441,3 +566,28 @@ class Renderer:
         self._post_target_texture.use(0)
         self.ui_texture.use(1)
         self._upscale_vao.render()
+
+    def high_quality_snapshot(self, ray_count: int = 64, bounces: int = 6) -> None:
+        """ Render with temporary high quality settings and save a snapshot. """
+        start = perf_counter()
+
+        old_ray_count = self.settings.ray_count
+        old_bounces = self.settings.bounces
+
+        self.settings.ray_count = ray_count
+        self.settings.bounces = bounces
+
+        self.render()
+
+        surf = pygame.image.frombytes(
+            self._context.screen.read(),
+            self._resolution,
+            "RGB"
+        )
+        pygame.image.save(pygame.transform.flip(surf, False, True), "snapshot.png")
+
+        self.settings.ray_count = old_ray_count
+        self.settings.bounces = old_bounces
+
+        elapsed = perf_counter() - start
+        print(f"High quality snapshot in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")

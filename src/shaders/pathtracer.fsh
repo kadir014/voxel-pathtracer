@@ -23,6 +23,7 @@
 #define BIG_VALUE 10000.0
 #define BLUENOISE_SIZE 1024
 #define MAX_DDA_STEPS 56
+#define EMISSIVE_MULT 2.7
 
 
 in vec2 v_uv;
@@ -41,6 +42,8 @@ uniform sampler3D s_grid;
 uniform sampler2D s_sky;
 uniform sampler2D s_albedo_atlas;
 uniform sampler2D s_emissive_atlas;
+uniform sampler2D s_roughness_atlas;
+uniform sampler2D s_reflectivity_atlas;
 
 
 struct Camera {
@@ -117,8 +120,14 @@ HitInfo dda(Ray ray) {
     // Traverse world texture
     for (int i = 0; i < MAX_DDA_STEPS; i++) {
         // Ray can start out of the map, find a different solution 
-        // if (out_of_grid(voxel)) {
-        //     return false;
+        // if (
+        //     voxel.x < 0.0 || voxel.y < 0.0 || voxel.z < 0.0 ||
+        //     voxel.x >= 16.0 || voxel.y >= 16.0 || voxel.z >= 16.0
+        // ) {
+        //     if (!started_outside)
+        //         return hitinfo;
+        // } else if (started_outside) {
+        //     started_outside = false;
         // }
 
         float hit_t = min(t_max.x, min(t_max.y, t_max.z));
@@ -249,7 +258,13 @@ vec3 random_in_unit_sphere() {
 /*
     Scatter the ray according to the surface material.
 */
-Ray brdf(Ray ray, HitInfo hitinfo, inout float specular) {
+Ray brdf(
+    Ray ray,
+    HitInfo hitinfo,
+    inout float specular,
+    float roughness,
+    float reflectivity
+) {
     vec3 new_pos = hitinfo.point + hitinfo.normal * EPSILON;
 
     float specular_chance = 0.0;
@@ -262,10 +277,7 @@ Ray brdf(Ray ray, HitInfo hitinfo, inout float specular) {
 
     // TODO: Metallics...
 
-    float specular_percentage = 0.0;
-    float roughness = 0.0;
-
-    specular = (specular_chance < specular_percentage) ? 1.0 : 0.0;
+    specular = (specular_chance < reflectivity) ? 1.0 : 0.0;
 
     vec3 diffuse_ray_dir = normalize(hitinfo.normal + random_in_unit_sphere());
     vec3 specular_ray_dir = reflect(ray.dir, hitinfo.normal);
@@ -310,11 +322,6 @@ vec3 pathtrace(Ray ray) {
             break;
         }
 
-        float specular = 0.0;
-        ray = brdf(ray, hitinfo, specular);
-
-        vec3 specular_color = vec3(1.0);
-
         /*
             0 -> top
             1 -> bottom
@@ -326,14 +333,21 @@ vec3 pathtrace(Ray ray) {
         else surface = 2.0;
 
         float atlas_w = 1.0 / 3.0;
-        float atlas_h = 1.0 / 4.0;
+        float atlas_h = 1.0 / 5.0;
 
         vec2 atlas_uv = hitinfo.face_uv;
         atlas_uv.x = atlas_uv.x * atlas_w + float(surface) * atlas_w;
         atlas_uv.y = atlas_uv.y * atlas_h + float(hitinfo.block_id - 1) * atlas_h;
 
         vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
-        vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * 3.0;
+        vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * EMISSIVE_MULT;
+        float roughness = texture(s_roughness_atlas, atlas_uv).r;
+        float reflectivity = texture(s_reflectivity_atlas, atlas_uv).r;
+
+        float specular = 0.0;
+        ray = brdf(ray, hitinfo, specular, roughness, reflectivity);
+
+        vec3 specular_color = vec3(1.0);
 
         radiance += emissive * radiance_delta;
         radiance_delta *= mix(albedo, specular_color, specular);
@@ -345,7 +359,7 @@ vec3 pathtrace(Ray ray) {
         */
         if (u_enable_roulette) {
             float roulette_result = max(radiance_delta.r, max(radiance_delta.g, radiance_delta.b));
-            if (prng() > roulette_result) {
+            if (bluenoise() > roulette_result) {
                 break;
             }
         

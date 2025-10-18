@@ -190,7 +190,9 @@ class App:
                     elif event.button == 2: #middle
                         block = 3
                     elif event.button == 3:
-                        block = 1
+                        block = 5
+                    else:
+                        continue
 
                     direction = (self.camera.look_at - self.camera.position).normalize()
                     hitinfo = self.dda(self.camera.position, direction)
@@ -212,6 +214,9 @@ class App:
 
                     elif event.key == pygame.K_LALT:
                         pygame.mouse.set_relative_mode(False)
+
+                    elif event.key == pygame.K_F12:
+                        self.renderer.high_quality_snapshot(700, 12)
                 
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_LALT:
@@ -283,7 +288,7 @@ class App:
             if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN):
                 _, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, 30)
                 _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, 5)
-                noise_name = ("None", "Mulberry32", "Bluenoise")[self.renderer.settings.noise_method]
+                noise_name = ("None", "Mulberry32 PRNG", "Bluenoise")[self.renderer.settings.noise_method]
                 _, self.renderer.settings.noise_method = imgui.slider_int(f"Noise method", self.renderer.settings.noise_method, 0, 2, format=noise_name)
                 _, self.renderer.settings.russian_roulette = imgui.checkbox("Enable russian-roulette", self.renderer.settings.russian_roulette)
 
