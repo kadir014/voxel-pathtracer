@@ -74,6 +74,8 @@ class App:
 
         self.renderer.update_grid_texture()
 
+        self.current_block = 1
+
     @property
     def logical_scale(self) -> float:
         # Assumes aspect ratio is the same.
@@ -186,20 +188,23 @@ class App:
                     if not pygame.mouse.get_relative_mode(): continue
 
                     if event.button == 1:
-                        block = 0
-                    elif event.button == 2: #middle
-                        block = 3
+                        mode = "break"
                     elif event.button == 3:
-                        block = 5
+                        mode = "place"
                     else:
                         continue
+
+                    if mode == "break":
+                        block = 0
+                    else:
+                        block = self.current_block
 
                     direction = (self.camera.look_at - self.camera.position).normalize()
                     hitinfo = self.dda(self.camera.position, direction)
 
                     voxel = pygame.Vector3(*hitinfo.voxel)
                     
-                    if event.button != 1:
+                    if mode == "place":
                         voxel += hitinfo.normal
 
                     ivoxel = (int(voxel.x), int(voxel.y), int(voxel.z))
@@ -216,7 +221,35 @@ class App:
                         pygame.mouse.set_relative_mode(False)
 
                     elif event.key == pygame.K_F12:
-                        self.renderer.high_quality_snapshot(700, 12)
+                        self.renderer.high_quality_snapshot()
+
+                    elif event.key == pygame.K_F1:
+                        self.world.save("map.save")
+
+                    elif event.key == pygame.K_F2:
+                        self.world.load("map.save")
+                        self.renderer.update_grid_texture()
+
+                    elif event.key == pygame.K_1:
+                        self.current_block = 1
+
+                    elif event.key == pygame.K_2:
+                        self.current_block = 2
+
+                    elif event.key == pygame.K_3:
+                        self.current_block = 3
+                    
+                    elif event.key == pygame.K_4:
+                        self.current_block = 4
+                    
+                    elif event.key == pygame.K_5:
+                        self.current_block = 5
+
+                    elif event.key == pygame.K_6:
+                        self.current_block = 6
+
+                    elif event.key == pygame.K_7:
+                        self.current_block = 7
                 
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_LALT:
@@ -272,7 +305,7 @@ class App:
             imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
             imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
 
-            if imgui.tree_node("Post-processing", imgui.TREE_NODE_DEFAULT_OPEN):
+            if imgui.tree_node("Post-processing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.postprocessing = imgui.checkbox("Enable post-processing", self.renderer.settings.postprocessing)
                 _, self.renderer.settings.exposure  = imgui.slider_float("Exposure", self.renderer.settings.exposure, -5.0, 5.0, format="%.1f")
 
@@ -285,12 +318,38 @@ class App:
                 
                 imgui.tree_pop()
 
-            if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN):
+            if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, 30)
                 _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, 5)
                 noise_name = ("None", "Mulberry32 PRNG", "Bluenoise")[self.renderer.settings.noise_method]
                 _, self.renderer.settings.noise_method = imgui.slider_int(f"Noise method", self.renderer.settings.noise_method, 0, 2, format=noise_name)
                 _, self.renderer.settings.russian_roulette = imgui.checkbox("Enable russian-roulette", self.renderer.settings.russian_roulette)
+
+                if imgui.tree_node("High-quality render settings"):
+                    _, self.renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.highquality_ray_count, 512, 2048)
+                    _, self.renderer.settings.highquality_bounces = imgui.slider_int(f"Bounces", self.renderer.settings.highquality_bounces, 5, 30)
+
+                    imgui.tree_pop()
+
+                imgui.tree_pop()
+
+            if imgui.tree_node("Sky", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+                _, self.renderer.settings.enable_sky_texture = imgui.checkbox("Enable sky texture", self.renderer.settings.enable_sky_texture)
+
+                _, self.renderer.settings.sky_color = imgui.color_edit3("Sky color", *self.renderer.settings.sky_color, imgui.COLOR_EDIT_NO_INPUTS)
+
+                imgui.tree_pop()
+
+            if imgui.tree_node("Controls", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+                imgui.text(f"[LMB] to break voxels")
+                imgui.text(f"[RMB] to place voxels")
+                imgui.text(f"[WASD] to move around")
+                imgui.text(f"[Q & E] to move vertically")
+                imgui.text(f"[ALT] to use enable cursor and use UI")
+                imgui.text(f"[F12] to take high-quality render snapshot")
+                imgui.text(f"[F1] to save map onto 'map.save' file")
+                imgui.text(f"[F2] to load map from 'map.save' file")
+                imgui.text(f"[ESC] to quit")
 
                 imgui.tree_pop()
 

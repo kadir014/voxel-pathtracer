@@ -8,6 +8,9 @@
 
 """
 
+import ast
+from time import perf_counter
+
 
 BLOCK_IDS = (
     None, # 0 is air
@@ -15,7 +18,9 @@ BLOCK_IDS = (
     "dirt",
     "glowstone",
     "grass",
-    "iron_block"
+    "iron_block",
+    "lime_wool",
+    "red_wool"
 )
 
 
@@ -46,3 +51,21 @@ class VoxelWorld:
 
     def __contains__(self, key: tuple[int, int, int]) -> bool:
         return key in self.__map
+    
+    def save(self, filepath: str) -> None:
+        start = perf_counter()
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(repr(self.__map))
+
+        elapsed = perf_counter() - start
+        print(f"Saved map in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+
+    def load(self, filepath: str) -> None:
+        start = perf_counter()
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            self.__map = ast.literal_eval(f.read())
+
+        elapsed = perf_counter() - start
+        print(f"Loaded map in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")

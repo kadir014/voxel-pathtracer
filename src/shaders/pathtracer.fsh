@@ -36,6 +36,8 @@ uniform int u_noise_method;
 uniform vec2 u_resolution;
 uniform float u_voxel_size;
 uniform bool u_enable_roulette;
+uniform bool u_enable_sky_texture;
+uniform vec3 u_sky_color;
 
 uniform sampler2D s_bluenoise;
 uniform sampler3D s_grid;
@@ -313,10 +315,17 @@ vec3 pathtrace(Ray ray) {
 
         // Ray did not hit anything, sample sky
         if (!hitinfo.hit) {
-            vec3 sky_color = texture(s_sky, uv_project_sphere(ray.dir)).rgb;
+            vec3 sky_color;
 
-            // Sky texture is already tonemapped
-            sky_color = pow(sky_color, vec3(2.2));
+            if (u_enable_sky_texture) {
+                sky_color = texture(s_sky, uv_project_sphere(ray.dir)).rgb;
+
+                // Sky texture is already tonemapped
+                sky_color = pow(sky_color, vec3(2.2));
+            }
+            else {
+                sky_color = u_sky_color;
+            }
 
             radiance += sky_color * radiance_delta;
             break;
@@ -333,7 +342,7 @@ vec3 pathtrace(Ray ray) {
         else surface = 2.0;
 
         float atlas_w = 1.0 / 3.0;
-        float atlas_h = 1.0 / 5.0;
+        float atlas_h = 1.0 / 7.0; // TODO: Pass block row count as uniform (or pass 1/h)
 
         vec2 atlas_uv = hitinfo.face_uv;
         atlas_uv.x = atlas_uv.x * atlas_w + float(surface) * atlas_w;

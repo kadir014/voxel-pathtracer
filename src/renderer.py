@@ -21,6 +21,9 @@ class RendererSettings:
     def __init__(self, renderer: "Renderer") -> None:
         self.__renderer = renderer
 
+        self.highquality_ray_count = 512
+        self.highquality_bounces = 12
+
     @property
     def postprocessing(self) -> bool:
         return self.__renderer._post_program["u_enable_post"].value
@@ -94,12 +97,28 @@ class RendererSettings:
         self.__renderer._pt_program["u_noise_method"].value = value
 
     @property
-    def russian_roulette(self) -> int:
+    def russian_roulette(self) -> bool:
         return self.__renderer._pt_program["u_enable_roulette"].value
     
     @russian_roulette.setter
-    def russian_roulette(self, value: int) -> None:
+    def russian_roulette(self, value: bool) -> None:
         self.__renderer._pt_program["u_enable_roulette"].value = value
+
+    @property
+    def enable_sky_texture(self) -> bool:
+        return self.__renderer._pt_program["u_enable_sky_texture"].value
+    
+    @enable_sky_texture.setter
+    def enable_sky_texture(self, value: bool) -> None:
+        self.__renderer._pt_program["u_enable_sky_texture"].value = value
+
+    @property
+    def sky_color(self) -> tuple[float, float, float]:
+        return self.__renderer._pt_program["u_sky_color"].value
+    
+    @sky_color.setter
+    def sky_color(self, value: tuple[float, float, float]) -> None:
+        self.__renderer._pt_program["u_sky_color"].value = value
 
 
 class Renderer:
@@ -173,6 +192,8 @@ class Renderer:
         self._pt_program["u_bounces"] = 3
         self._pt_program["u_noise_method"] = 1
         self._pt_program["u_enable_roulette"] = False
+        self._pt_program["u_enable_sky_texture"] = True
+        self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = self._world.voxel_size
 
@@ -241,6 +262,7 @@ class Renderer:
         self.ui_surface = pygame.Surface(self._resolution, pygame.SRCALPHA)
         self.ui_surface.fill((0, 0, 0, 0))
         self.ui_texture = self._context.texture(self._resolution, 4)
+        self.null_ui_texture = self._context.texture(self._resolution, 4)
 
         crosshair_surf = pygame.image.load("data/crosshair.png")
         crosshair_pos = (self._resolution[0]*0.5, self._resolution[1]*0.5)
@@ -261,7 +283,9 @@ class Renderer:
             "grass_side": pygame.image.load("data/blocks/grass_side.png"),
             "iron_block": pygame.image.load("data/blocks/iron_block.png"),
             "iron_block_roughness": pygame.image.load("data/blocks/iron_block_roughness.png"),
-            "iron_block_reflectivity": pygame.image.load("data/blocks/iron_block_reflectivity.png")
+            "iron_block_reflectivity": pygame.image.load("data/blocks/iron_block_reflectivity.png"),
+            "lime_wool": pygame.image.load("data/blocks/lime_wool.png"),
+            "red_wool": pygame.image.load("data/blocks/red_wool.png")
         }
 
         # albedo atlas
@@ -271,7 +295,9 @@ class Renderer:
             "dirt": ("dirt", "dirt", "dirt"),
             "glowstone": ("glowstone", "glowstone", "glowstone"),
             "grass": ("grass_top", "dirt", "grass_side"),
-            "iron_block": ("iron_block", "iron_block", "iron_block")
+            "iron_block": ("iron_block", "iron_block", "iron_block"),
+            "lime_wool": ("lime_wool", "lime_wool", "lime_wool"),
+            "red_wool": ("red_wool", "red_wool", "red_wool")
         }
 
         self.emissive_atlas = {
@@ -280,7 +306,9 @@ class Renderer:
             "dirt": (None, None, None),
             "glowstone": ("glowstone_emissive", "glowstone_emissive", "glowstone_emissive"),
             "grass": (None, None, None),
-            "iron_block": (None, None, None)
+            "iron_block": (None, None, None),
+            "lime_wool": (None, None, None),
+            "red_wool": (None, None, None)
         }
 
         self.roughness_atlas = {
@@ -289,7 +317,9 @@ class Renderer:
             "dirt": (None, None, None),
             "glowstone": (None, None, None),
             "grass": (None, None, None),
-            "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness")
+            "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness"),
+            "lime_wool": (None, None, None),
+            "red_wool": (None, None, None)
         }
 
         self.reflectivity_atlas = {
@@ -298,7 +328,9 @@ class Renderer:
             "dirt": (None, None, None),
             "glowstone": (None, None, None),
             "grass": (None, None, None),
-            "iron_block": ("iron_block_reflectivity", "iron_block_reflectivity", "iron_block_reflectivity")
+            "iron_block": ("iron_block_reflectivity", "iron_block_reflectivity", "iron_block_reflectivity"),
+            "lime_wool": (None, None, None),
+            "red_wool": (None, None, None)
         }
 
         self.generate_block_atlas_texture()
@@ -545,7 +577,7 @@ class Renderer:
                 )
             )
 
-    def render(self) -> None:
+    def render(self, ui: bool = True) -> None:
         """ Render one frame. """
 
         self._pathtracer_fbo.use()
@@ -564,20 +596,23 @@ class Renderer:
 
         self._context.screen.use()
         self._post_target_texture.use(0)
-        self.ui_texture.use(1)
+        if ui:
+            self.ui_texture.use(1)
+        else:
+            self.null_ui_texture.use(1)
         self._upscale_vao.render()
 
-    def high_quality_snapshot(self, ray_count: int = 64, bounces: int = 6) -> None:
+    def high_quality_snapshot(self) -> None:
         """ Render with temporary high quality settings and save a snapshot. """
         start = perf_counter()
 
         old_ray_count = self.settings.ray_count
         old_bounces = self.settings.bounces
 
-        self.settings.ray_count = ray_count
-        self.settings.bounces = bounces
+        self.settings.ray_count = self.settings.highquality_ray_count
+        self.settings.bounces = self.settings.highquality_bounces
 
-        self.render()
+        self.render(ui=False)
 
         surf = pygame.image.frombytes(
             self._context.screen.read(),
@@ -590,4 +625,4 @@ class Renderer:
         self.settings.bounces = old_bounces
 
         elapsed = perf_counter() - start
-        print(f"High quality snapshot in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+        print(f"High quality render in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
