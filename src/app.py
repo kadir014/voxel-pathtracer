@@ -14,10 +14,12 @@ from dataclasses import dataclass
 import pygame
 import imgui
 
+from src.common import MAX_RAYS_PER_PIXEL, MAX_BOUNCES
 from src.camera import Camera
 from src.world import VoxelWorld
 from src.renderer import Renderer
 from src.gui import ImguiPygameModernGLAbomination
+from src.platforminfo import get_cpu_info, get_gpu_info
 
 
 def vec3_sign(v: pygame.Vector3) -> pygame.Vector3:
@@ -69,6 +71,13 @@ class App:
         self.world = VoxelWorld((16, 16, 16))
         self.renderer = Renderer(self._resolution, self._logical_resolution, self.world)
         self.gui = ImguiPygameModernGLAbomination(self._resolution, self.renderer._context)
+
+        self.camera.position = pygame.Vector3(40, 30, -20)
+        self.camera.look_at = pygame.Vector3(40, 0, 40)
+        self.camera.update()
+
+        self.cpu_info = get_cpu_info()
+        self.gpu_info = get_gpu_info(self.renderer._context)
 
         self.is_running = False
 
@@ -179,12 +188,20 @@ class App:
         while self.is_running:
             dt = self.clock.tick(self.target_fps) * 0.001
 
+            should_reset_acc = False
+
             events = pygame.event.get()
             for event in events:
                 if event.type == pygame.QUIT:
                     self.is_running = False
 
-                elif event.type == pygame.MOUSEBUTTONDOWN:
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    # TODO: Resetting accumulation every mouse button event
+                    #       might not be desirable in the future, but for now
+                    #       it's good enough instead of checking every single
+                    #       UI update and world state change.
+                    should_reset_acc = True
+
                     if not pygame.mouse.get_relative_mode(): continue
 
                     if event.button == 1:
@@ -212,10 +229,14 @@ class App:
                     if hitinfo.hit:
                         self.world[ivoxel] = block
                         self.renderer.update_grid_texture()
+                        should_reset_acc = True
 
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.is_running = False
+
+                    elif event.key == pygame.K_r:
+                        should_reset_acc = True
 
                     elif event.key == pygame.K_LALT:
                         pygame.mouse.set_relative_mode(False)
@@ -225,10 +246,12 @@ class App:
 
                     elif event.key == pygame.K_F1:
                         self.world.save("map.save")
+                        should_reset_acc = True
 
                     elif event.key == pygame.K_F2:
                         self.world.load("map.save")
                         self.renderer.update_grid_texture()
+                        should_reset_acc = True
 
                     elif event.key == pygame.K_1:
                         self.current_block = 1
@@ -267,6 +290,16 @@ class App:
                 self.camera.rotate_yaw(-rot.x)
                 self.camera.rotate_pitch(rot.y)
 
+                if abs(mouse_rel.x) > 0.0 or abs(mouse_rel.y) > 0.0:
+                    should_reset_acc = True
+
+            else:
+                # If the cursor mode is active and mouse is pressed,
+                # it means the user is adjusting the UI
+                # so reset accumulation to reflect the changes.
+                if any(pygame.mouse.get_pressed()):
+                    should_reset_acc = True
+
             keys = pygame.key.get_pressed()
 
             mov = 40.0 * dt
@@ -291,10 +324,15 @@ class App:
                 self.camera.position += pygame.Vector3(0.0, mov, 0.0)
                 self.camera.look_at += pygame.Vector3(0.0, mov, 0.0)
 
+            if keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d] or keys[pygame.K_e] or keys[pygame.K_q]:
+                should_reset_acc = True
+
+            if should_reset_acc:
+                self.renderer.settings.acc_frame = 0
+
             self.camera.update()
             self._update_camera_uniform()
 
-            #self.renderer.set_voxel((voxel_x, voxel_y, voxel_z))
             self.renderer.render()
 
             imgui.new_frame()
@@ -304,6 +342,9 @@ class App:
             imgui.text(f"FPS: {round(self.clock.get_fps())}")
             imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
             imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
+            imgui.text(f"CPU: {self.cpu_info['name']}")
+            imgui.text(f"GPU: {self.gpu_info['name']}")
+            imgui.text(f"Accumulation: {self.renderer.settings.acc_frame}")
 
             if imgui.tree_node("Post-processing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.postprocessing = imgui.checkbox("Enable post-processing", self.renderer.settings.postprocessing)
@@ -319,11 +360,12 @@ class App:
                 imgui.tree_pop()
 
             if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-                _, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, 30)
-                _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, 5)
+                _, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, MAX_RAYS_PER_PIXEL)
+                _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, MAX_BOUNCES)
                 noise_name = ("None", "Mulberry32 PRNG", "Bluenoise")[self.renderer.settings.noise_method]
                 _, self.renderer.settings.noise_method = imgui.slider_int(f"Noise method", self.renderer.settings.noise_method, 0, 2, format=noise_name)
                 _, self.renderer.settings.russian_roulette = imgui.checkbox("Enable russian-roulette", self.renderer.settings.russian_roulette)
+                _, self.renderer.settings.enable_accumulation = imgui.checkbox("Enable accumulation", self.renderer.settings.enable_accumulation)
 
                 if imgui.tree_node("High-quality render settings"):
                     _, self.renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.highquality_ray_count, 512, 2048)
@@ -335,8 +377,14 @@ class App:
 
             if imgui.tree_node("Sky", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.enable_sky_texture = imgui.checkbox("Enable sky texture", self.renderer.settings.enable_sky_texture)
-
                 _, self.renderer.settings.sky_color = imgui.color_edit3("Sky color", *self.renderer.settings.sky_color, imgui.COLOR_EDIT_NO_INPUTS)
+
+                imgui.tree_pop()
+
+            if imgui.tree_node("Camera", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+                _, self.camera.focal_length = imgui.slider_float("Focal length", self.camera.focal_length, 0.0, 0.5, format="%.4f")
+                _, self.camera.horizontal_size = imgui.slider_float("Horizontal size", self.camera.horizontal_size, 0.0, 0.5, format="%.4f")
+                _, mouse_sensitivity = imgui.slider_float("Mouse sensitivity", mouse_sensitivity, 0.01, 0.3, format="%.4f")
 
                 imgui.tree_pop()
 
@@ -345,6 +393,8 @@ class App:
                 imgui.text(f"[RMB] to place voxels")
                 imgui.text(f"[WASD] to move around")
                 imgui.text(f"[Q & E] to move vertically")
+                imgui.text(f"[1 - 9] to change current block")
+                imgui.text(f"[R] to reset accumulation")
                 imgui.text(f"[ALT] to use enable cursor and use UI")
                 imgui.text(f"[F12] to take high-quality render snapshot")
                 imgui.text(f"[F1] to save map onto 'map.save' file")

@@ -24,6 +24,8 @@ class RendererSettings:
         self.highquality_ray_count = 512
         self.highquality_bounces = 12
 
+        self.acc_frame = 0
+
     @property
     def postprocessing(self) -> bool:
         return self.__renderer._post_program["u_enable_post"].value
@@ -120,6 +122,17 @@ class RendererSettings:
     def sky_color(self, value: tuple[float, float, float]) -> None:
         self.__renderer._pt_program["u_sky_color"].value = value
 
+    @property
+    def enable_accumulation(self) -> bool:
+        return self.__renderer._pt_program["u_enable_accumulation"].value
+    
+    @enable_accumulation.setter
+    def enable_accumulation(self, value: bool) -> None:
+        if self.__renderer._pt_program["u_enable_accumulation"].value != value:
+            self.acc_frame = 0
+
+        self.__renderer._pt_program["u_enable_accumulation"].value = value
+
 
 class Renderer:
     """
@@ -188,6 +201,7 @@ class Renderer:
         self._pt_program["s_emissive_atlas"] = 4
         self._pt_program["s_roughness_atlas"] = 5
         self._pt_program["s_reflectivity_atlas"] = 6
+        self._pt_program["s_previous_frame"] = 7
         self._pt_program["u_ray_count"] = 8
         self._pt_program["u_bounces"] = 3
         self._pt_program["u_noise_method"] = 1
@@ -196,6 +210,8 @@ class Renderer:
         self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = self._world.voxel_size
+        self._pt_program["u_acc_frame"] = 0
+        self._pt_program["u_enable_accumulation"] = True
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -233,9 +249,12 @@ class Renderer:
         self._bluenoise_texture.repeat_y = True
 
         # Note: data type being f4 lets us store colors in HDR
-        self._pathtracer_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f4")
-        self._pathtracer_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        self._pathtracer_fbo = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture,))
+        self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        self._pathtracer_target_texture0.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture0,))
+        self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        self._pathtracer_target_texture1.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture1,))
 
         self._post_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
         self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
@@ -379,7 +398,7 @@ class Renderer:
         self._voxel_tex.write(data)
 
         elapsed = perf_counter() - start
-        print(f"Updated grid in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+        print(f"Updated world texture in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
 
     def generate_block_atlas_texture(self) -> None:
         # atlas -> 3xN
@@ -580,7 +599,27 @@ class Renderer:
     def render(self, ui: bool = True) -> None:
         """ Render one frame. """
 
-        self._pathtracer_fbo.use()
+        self._pt_program["u_acc_frame"].value = self.settings.acc_frame
+
+        targets = (self._pathtracer_target_texture0, self._pathtracer_target_texture1)
+        fbos = (self._pathtracer_fbo0, self._pathtracer_fbo1)
+
+        # frame 0:
+        # current fbo -> 0
+        # current target -> 0
+        # previous target -> 1
+        #
+        # frame 1:
+        # current fbo -> 1
+        # current target -> 1
+        # previous target -> 0
+
+        frame = self.settings.acc_frame
+        current_fbo = fbos[frame % 2]
+        current_target = targets[frame % 2]
+        previous_target = targets[(frame + 1 ) % 2]
+
+        current_fbo.use()
         self._bluenoise_texture.use(0)
         self._voxel_tex.use(1)
         self._sky_texture.use(2)
@@ -588,10 +627,11 @@ class Renderer:
         self.emissive_atlas_tex.use(4)
         self.roughness_atlas_tex.use(5)
         self.reflectivity_atlas_tex.use(6)
+        previous_target.use(7)
         self._pt_vao.render()
 
         self._post_fbo.use()
-        self._pathtracer_target_texture.use(0)
+        current_target.use(0)
         self._post_vao.render()
 
         self._context.screen.use()
@@ -602,15 +642,20 @@ class Renderer:
             self.null_ui_texture.use(1)
         self._upscale_vao.render()
 
+        if self.settings.enable_accumulation:
+            self.settings.acc_frame += 1
+
     def high_quality_snapshot(self) -> None:
         """ Render with temporary high quality settings and save a snapshot. """
         start = perf_counter()
 
         old_ray_count = self.settings.ray_count
         old_bounces = self.settings.bounces
+        old_enable_accumulation = self.settings.enable_accumulation
 
         self.settings.ray_count = self.settings.highquality_ray_count
         self.settings.bounces = self.settings.highquality_bounces
+        self.settings.enable_accumulation = False
 
         self.render(ui=False)
 
@@ -623,6 +668,7 @@ class Renderer:
 
         self.settings.ray_count = old_ray_count
         self.settings.bounces = old_bounces
+        self.settings.enable_accumulation = old_enable_accumulation
 
         elapsed = perf_counter() - start
         print(f"High quality render in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")

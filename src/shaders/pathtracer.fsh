@@ -38,6 +38,8 @@ uniform float u_voxel_size;
 uniform bool u_enable_roulette;
 uniform bool u_enable_sky_texture;
 uniform vec3 u_sky_color;
+uniform uint u_acc_frame;
+uniform bool u_enable_accumulation;
 
 uniform sampler2D s_bluenoise;
 uniform sampler3D s_grid;
@@ -46,6 +48,7 @@ uniform sampler2D s_albedo_atlas;
 uniform sampler2D s_emissive_atlas;
 uniform sampler2D s_roughness_atlas;
 uniform sampler2D s_reflectivity_atlas;
+uniform sampler2D s_previous_frame;
 
 
 struct Camera {
@@ -368,7 +371,7 @@ vec3 pathtrace(Ray ray) {
         */
         if (u_enable_roulette) {
             float roulette_result = max(radiance_delta.r, max(radiance_delta.g, radiance_delta.b));
-            if (bluenoise() > roulette_result) {
+            if (prng() > roulette_result) {
                 break;
             }
         
@@ -394,7 +397,8 @@ void main() {
         prng_state = wang_hash(
             uint(pixel.x) * 1973u +
             uint(pixel.y) * 9277u +
-            uint(sample_i) * 26699u
+            uint(sample_i) * 26699u +
+            uint(u_acc_frame) * 85889u
         );
 
         Ray ray = generate_ray(v_uv * 2.0 - 1.0);
@@ -404,5 +408,13 @@ void main() {
         final_radiance += radiance / u_ray_countf;
     }
 
-    f_color = vec4(final_radiance, 1.0);
+    vec3 final_color = final_radiance;
+
+    if (u_enable_accumulation) {
+        vec3 previous_color = texture(s_previous_frame, v_uv).rgb;
+        float weight = 1.0 / float(u_acc_frame + uint(1));
+        final_color = mix(previous_color, final_color, weight);
+    }
+
+    f_color = vec4(final_color, 1.0);
 }

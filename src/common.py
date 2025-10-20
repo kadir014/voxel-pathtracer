@@ -16,3 +16,10 @@ LOGICAL_SCALE = 0.75
 
 # 0 to uncap
 TARGET_FPS = 200
+
+
+# These are set so people don't fry their GPU accidentaly
+# increase at your own risk
+
+MAX_RAYS_PER_PIXEL = 30
+MAX_BOUNCES = 5
