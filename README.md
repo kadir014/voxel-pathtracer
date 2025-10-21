@@ -7,7 +7,7 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 
 # Features
 - Real-time
-- Global illumination via Monte Carlo pathtracing
+- Global illumination via Monte Carlo Path Tracing
 - Voxel world traversal accelerated with DDA
 - Filmic tonemapping
 - Color grading postprocessing
@@ -25,6 +25,7 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Transparent objects & transmission
 - Volumetrics
 - Denoising
+- Temporal reprojection for progressive rendering
 - Low discrepancy noise method 
 - Next event estimation (NEE)
 - Multiple importance sampling (MIS)
@@ -43,13 +44,11 @@ $ python main.py
 
 
 # Resources & References
-- [Physically Based Rendering Book](https://www.pbr-book.org/4ed/contents)
-- [Ray Tracing in One Weekend](https://raytracing.github.io/)
-- [Scratchapixel ray tracing articles](https://www.scratchapixel.com/)
-- [Free bluenoise textures repository](https://github.com/Calinou/free-blue-noise-textures)
-- My previous experiments:
-  - [Toy Pathtracer](https://github.com/kadir014/toy-pathtracer)
-  - [Radiance Cascades experiments](https://github.com/kadir014/radiance-cascades-experiments)
+- M. Pharr, W. Jakob, and G. Humphreys, ["Physically Based Rendering" book](https://www.pbr-book.org/4ed/contents)
+- P. Shirley, T. Black, S. Hollasch, ["Ray Tracing in One Weekend" book series](https://raytracing.github.io/)
+- Alan Wolfe, ["Casual Shadertoy Path Tracing" blog series](https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/)
+- Scratchapixel, [Ray tracing articles](https://www.scratchapixel.com/)
+- Calinou, [Free bluenoise textures repository](https://github.com/Calinou/free-blue-noise-textures)
 
 
 
