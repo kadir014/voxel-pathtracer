@@ -133,6 +133,14 @@ class RendererSettings:
 
         self.__renderer._pt_program["u_enable_accumulation"].value = value
 
+    @property
+    def antialiasing(self) -> int:
+        return self.__renderer._pt_program["u_antialiasing"].value
+    
+    @antialiasing.setter
+    def antialiasing(self, value: int) -> None:
+        self.__renderer._pt_program["u_antialiasing"].value = value
+
 
 class Renderer:
     """
@@ -212,6 +220,7 @@ class Renderer:
         self._pt_program["u_voxel_size"] = self._world.voxel_size
         self._pt_program["u_acc_frame"] = 0
         self._pt_program["u_enable_accumulation"] = True
+        self._pt_program["u_antialiasing"] = 1
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -276,18 +285,6 @@ class Renderer:
 
         self._voxel_tex = self._context.texture3d(self._world.dimensions, 1)
         self._voxel_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
-
-
-        self.ui_surface = pygame.Surface(self._resolution, pygame.SRCALPHA)
-        self.ui_surface.fill((0, 0, 0, 0))
-        self.ui_texture = self._context.texture(self._resolution, 4)
-        self.null_ui_texture = self._context.texture(self._resolution, 4)
-
-        crosshair_surf = pygame.image.load("data/crosshair.png")
-        crosshair_pos = (self._resolution[0]*0.5, self._resolution[1]*0.5)
-        self.ui_surface.blit(crosshair_surf, crosshair_surf.get_rect(center=crosshair_pos))
-
-        self.update_ui_texture()
 
 
         self.block_texture_size = (16, 16)
@@ -357,6 +354,19 @@ class Renderer:
         self.generate_roughness_atlas_texture()
         self.generate_reflectivity_atlas_texture()
 
+
+        self.ui_surface = pygame.Surface(self._resolution, pygame.SRCALPHA)
+        self.ui_surface.fill((0, 0, 0, 0))
+        self.ui_texture = self._context.texture(self._resolution, 4)
+        self.null_ui_texture = self._context.texture(self._resolution, 4)
+
+        self.ui_scale = 2.0
+        self.crosshair_surf = pygame.image.load("data/ui/crosshair.png")
+        self.hotbar_surf = pygame.transform.scale_by(pygame.image.load("data/ui/hotbar.png"), self.ui_scale)
+        self.hotbar_sel_surf = pygame.transform.scale_by(pygame.image.load("data/ui/hotbar_selection.png"), self.ui_scale)
+
+        self.update_ui()
+
     def __del__(self) -> None:
         self._context.release()
 
@@ -366,8 +376,45 @@ class Renderer:
         dtype = "f" if isinstance(data[0], float) else "I"
         return self._context.buffer(array(dtype, data))
     
+    def update_ui_surface(self, hotbar: int = 0) -> None:
+        self.ui_surface.fill((0, 0, 0, 0))
+
+        crosshair_pos = (self._resolution[0]*0.5, self._resolution[1]*0.5)
+        self.ui_surface.blit(self.crosshair_surf, self.crosshair_surf.get_rect(center=crosshair_pos))
+
+        hotbar_pos = (self._resolution[0]*0.5, self._resolution[1] - self.hotbar_surf.height)
+        self.ui_surface.blit(self.hotbar_surf, self.hotbar_surf.get_rect(centerx=hotbar_pos[0], top=hotbar_pos[1]))
+
+        hotbar_single_size = self.hotbar_surf.width / 9
+
+        hotbar_sel_pos = (
+            self._resolution[0]*0.5 - self.hotbar_surf.width * 0.5 + hotbar_single_size * hotbar + hotbar_single_size * 0.5,
+            self._resolution[1] - self.hotbar_surf.height
+        )
+        self.ui_surface.blit(self.hotbar_sel_surf, self.hotbar_sel_surf.get_rect(centerx=hotbar_sel_pos[0], top=hotbar_sel_pos[1]))
+
+        for i in range(1, min(9, len(BLOCK_IDS))):
+            block = BLOCK_IDS[i]
+
+            if block == "grass":
+                block = "grass_side"
+
+            block_surf = pygame.transform.scale_by(self.block_textures[block], 1.4)
+
+            x = self._resolution[0] * 0.5 - self.hotbar_surf.width * 0.495 - hotbar_single_size * 0.5
+            x += i * hotbar_single_size
+            y = self._resolution[1] - self.hotbar_surf.height + hotbar_single_size * 0.55
+            self.ui_surface.blit(block_surf, block_surf.get_frect(center=(x,y)))
+    
     def update_ui_texture(self) -> None:
         self.ui_texture.write(pygame.image.tobytes(self.ui_surface, "RGBA", True))
+
+    def update_ui(self, hotbar: int = 0) -> None:
+        start = perf_counter()
+        self.update_ui_surface(hotbar)
+        self.update_ui_texture()
+        elapsed = perf_counter() - start
+        print(f"Updated UI in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
 
     def update_grid_texture(self) -> None:
         start = perf_counter()

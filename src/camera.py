@@ -52,6 +52,12 @@ class Camera:
     distance
         Distance from the target.
         This is only used in orbit mode and has to be set manually.
+    u
+        Horizontal axis of image plane.
+    v
+        Vertical axis of image plane.
+    center
+        Center of the image plane.
     """
 
     def __init__(self,
@@ -87,6 +93,11 @@ class Camera:
 
         # Only for orbit camera
         self.distance = 30.0
+
+        # Image plane attributes
+        self.u: pygame.Vector2
+        self.v: pygame.Vector2
+        self.center: pygame.Vector2
 
         self.update()
 

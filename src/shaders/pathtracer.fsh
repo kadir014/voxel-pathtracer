@@ -40,6 +40,7 @@ uniform bool u_enable_sky_texture;
 uniform vec3 u_sky_color;
 uniform uint u_acc_frame;
 uniform bool u_enable_accumulation;
+uniform int u_antialiasing;
 
 uniform sampler2D s_bluenoise;
 uniform sampler3D s_grid;
@@ -75,15 +76,6 @@ struct HitInfo {
 };
 
 
-vec3 sign_vec3(vec3 v) {
-    return vec3(
-        int(v.x > 0) - int(v.x < 0),
-        int(v.y > 0) - int(v.y < 0),
-        int(v.z > 0) - int(v.z < 0)
-    );
-}
-
-
 HitInfo dda(Ray ray) {
     HitInfo hitinfo = HitInfo(
         false,
@@ -98,7 +90,11 @@ HitInfo dda(Ray ray) {
     voxel.y = floor(voxel.y);
     voxel.z = floor(voxel.z);
 
-    vec3 step_dir = sign_vec3(ray.dir);
+    vec3 step_dir = vec3(
+        int(ray.dir.x > 0) - int(ray.dir.x < 0),
+        int(ray.dir.y > 0) - int(ray.dir.y < 0),
+        int(ray.dir.z > 0) - int(ray.dir.z < 0)
+    );
 
     vec3 next_boundary = vec3(
         (voxel.x + (step_dir.x > 0.0 ? 1.0 : 0.0)) * u_voxel_size,
@@ -401,7 +397,21 @@ void main() {
             uint(u_acc_frame) * 85889u
         );
 
-        Ray ray = generate_ray(v_uv * 2.0 - 1.0);
+        vec2 ray_pos = v_uv * 2.0 - 1.0;
+
+        if (u_antialiasing == 1) {
+            /*
+                Do antialiasing by sampling the rays with a small amount of jitter.
+                This is most effective if progressive rendering is enabled so
+                the temporal jitter gets accumulated and averaged.
+                But works with single frame renders as well.
+            */
+            float pixel_width = 1.0 / u_resolution.x;
+            float jitter_amount = pixel_width * 4.0;
+            ray_pos += vec2(prng() - 0.5, prng() - 0.5) * jitter_amount;
+        }
+
+        Ray ray = generate_ray(ray_pos);
 
         vec3 radiance = pathtrace(ray);
 

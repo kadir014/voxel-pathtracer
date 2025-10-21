@@ -22,22 +22,6 @@ from src.gui import ImguiPygameModernGLAbomination
 from src.platforminfo import get_cpu_info, get_gpu_info
 
 
-def vec3_sign(v: pygame.Vector3) -> pygame.Vector3:
-    return pygame.Vector3(
-        int(v.x > 0) - int(v.x < 0),
-        int(v.y > 0) - int(v.y < 0),
-        int(v.z > 0) - int(v.z < 0)
-    )
-
-
-@dataclass
-class HitInfo:
-    hit: bool
-    point: pygame.Vector3
-    normal: pygame.Vector3
-    voxel: tuple[int, int, int]
-
-
 class App:
     """
     Top-level application class.
@@ -113,73 +97,6 @@ class App:
             self.camera.v.z
         )
 
-    def dda(self, origin: pygame.Vector3, dir: pygame.Vector3) -> HitInfo:
-        # defined in shader
-        MAX_DDA_STEPS = 34
-        
-        voxel = origin / self.world.voxel_size
-        voxel.x = floor(voxel.x)
-        voxel.y = floor(voxel.y)
-        voxel.z = floor(voxel.z)
-
-        step = vec3_sign(dir)
-
-        next_boundary = pygame.Vector3(
-            (voxel.x + (1.0 if step.x > 0.0 else 0.0)) * self.world.voxel_size,
-            (voxel.y + (1.0 if step.y > 0.0 else 0.0)) * self.world.voxel_size,
-            (voxel.z + (1.0 if step.z > 0.0 else 0.0)) * self.world.voxel_size
-        )
-
-        t_max = next_boundary - origin
-        if (dir.x == 0.0): t_max.x = float("inf")
-        else: t_max.x /= dir.x
-        if (dir.y == 0.0): t_max.y = float("inf")
-        else: t_max.y /= dir.y
-        if (dir.z == 0.0): t_max.z = float("inf")
-        else: t_max.z /= dir.z
-
-        t_delta = pygame.Vector3(0.0)
-        if dir.x == 0.0: t_delta.x = float("inf")
-        else: t_delta.x = abs(self.world.voxel_size / dir.x)
-        if dir.y == 0.0: t_delta.y = float("inf")
-        else: t_delta.y = abs(self.world.voxel_size / dir.y)
-        if dir.z == 0.0: t_delta.z = float("inf")
-        else: t_delta.z = abs(self.world.voxel_size / dir.z)
-
-        normal = pygame.Vector3(0.0)
-
-        # traverse
-        for i in range(MAX_DDA_STEPS):
-            hit_t = min(t_max.x, t_max.y, t_max.z)
-            
-            if t_max.x < t_max.y and t_max.x < t_max.z:
-                voxel.x += step.x
-                t_max.x += t_delta.x
-                normal = pygame.Vector3(-step.x, 0.0, 0.0)
-            
-            elif t_max.y < t_max.z:
-                voxel.y += step.y
-                t_max.y += t_delta.y
-                normal = pygame.Vector3(0.0, -step.y, 0.0)
-
-            else:
-                voxel.z += step.z
-                t_max.z += t_delta.z
-                normal = pygame.Vector3(0.0, 0.0, -step.z)
-
-            ivoxel = (int(voxel.x), int(voxel.y), int(voxel.z))
-            if ivoxel not in self.world: continue
-            sample = self.world[ivoxel]
-            if sample > 0:
-                return HitInfo(
-                    True,
-                    origin + dir * hit_t,
-                    normal,
-                    ivoxel
-                )
-            
-        return HitInfo(False, pygame.Vector3(), pygame.Vector3(), (0, 0, 0))
-
     def run(self) -> None:
         self.is_running = True
 
@@ -196,13 +113,7 @@ class App:
                 if event.type == pygame.QUIT:
                     self.is_running = False
 
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    # TODO: Resetting accumulation every mouse button event
-                    #       might not be desirable in the future, but for now
-                    #       it's good enough instead of checking every single
-                    #       UI update and world state change.
-                    should_reset_acc = True
-
+                elif event.type == pygame.MOUSEBUTTONDOWN:
                     if not pygame.mouse.get_relative_mode(): continue
 
                     if event.button == 1:
@@ -218,7 +129,7 @@ class App:
                         block = self.current_block
 
                     direction = self.camera.front
-                    hitinfo = self.dda(self.camera.position, direction)
+                    hitinfo = self.world.dda(self.camera.position, direction)
 
                     voxel = pygame.Vector3(*hitinfo.voxel)
                     
@@ -230,6 +141,14 @@ class App:
                     if hitinfo.hit:
                         self.world[ivoxel] = block
                         self.renderer.update_grid_texture()
+                        should_reset_acc = True
+
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    # TODO: Resetting accumulation every mouse button event
+                    #       might not be desirable in the future, but for now
+                    #       it's good enough instead of checking every single
+                    #       UI update and world state change.
+                    if not pygame.mouse.get_relative_mode():
                         should_reset_acc = True
 
                 elif event.type == pygame.KEYDOWN:
@@ -256,24 +175,31 @@ class App:
 
                     elif event.key == pygame.K_1:
                         self.current_block = 1
+                        self.renderer.update_ui(self.current_block - 1)
 
                     elif event.key == pygame.K_2:
                         self.current_block = 2
+                        self.renderer.update_ui(self.current_block - 1)
 
                     elif event.key == pygame.K_3:
                         self.current_block = 3
+                        self.renderer.update_ui(self.current_block - 1)
                     
                     elif event.key == pygame.K_4:
                         self.current_block = 4
+                        self.renderer.update_ui(self.current_block - 1)
                     
                     elif event.key == pygame.K_5:
                         self.current_block = 5
+                        self.renderer.update_ui(self.current_block - 1)
 
                     elif event.key == pygame.K_6:
                         self.current_block = 6
+                        self.renderer.update_ui(self.current_block - 1)
 
                     elif event.key == pygame.K_7:
                         self.current_block = 7
+                        self.renderer.update_ui(self.current_block - 1)
                 
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_LALT:
@@ -382,10 +308,15 @@ class App:
             if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, MAX_RAYS_PER_PIXEL)
                 _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, MAX_BOUNCES)
+
                 noise_name = ("None", "Mulberry32 PRNG", "Bluenoise")[self.renderer.settings.noise_method]
                 _, self.renderer.settings.noise_method = imgui.slider_int(f"Noise method", self.renderer.settings.noise_method, 0, 2, format=noise_name)
+
                 _, self.renderer.settings.russian_roulette = imgui.checkbox("Enable russian-roulette", self.renderer.settings.russian_roulette)
                 _, self.renderer.settings.enable_accumulation = imgui.checkbox("Enable accumulation", self.renderer.settings.enable_accumulation)
+
+                aa_name = ("None", "Jitter Sampling")[self.renderer.settings.antialiasing]
+                _, self.renderer.settings.antialiasing = imgui.slider_int(f"Anti-aliasing", self.renderer.settings.antialiasing, 0, 1, format=aa_name)
 
                 if imgui.tree_node("High-quality render settings"):
                     _, self.renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.highquality_ray_count, 512, 2048)
@@ -404,7 +335,7 @@ class App:
             if imgui.tree_node("Camera", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.camera.fov = imgui.slider_float("FOV", self.camera.fov, 0.0, 180.0, format="%.4f")
                 _, mouse_sensitivity = imgui.slider_float("Sensitivity", mouse_sensitivity, 0.01, 0.3, format="%.4f")
-                _, camera_mode_int = imgui.slider_int("Mode", self.camera.mode.value, 0, 1, format=self.camera.mode.name)
+                _, camera_mode_int = imgui.slider_int("Mode", self.camera.mode.value, 0, 1, format=self.camera.mode.name.lower().replace("_", " ").capitalize())
                 self.camera.mode = CameraMode(camera_mode_int)
 
                 imgui.tree_pop()
