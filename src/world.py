@@ -67,7 +67,7 @@ class VoxelWorld:
         # Grass floor
         for z in range(self.dimensions[2]):
             for x in range(self.dimensions[0]):
-                self.__map[(x, 0, z)] = 4
+                self.__map[(x, 0, z)] = BLOCK_IDS.index("grass")
 
     def __getitem__(self, key: tuple[int, int, int]) -> int:
         return self.__map[key]
@@ -96,7 +96,11 @@ class VoxelWorld:
         elapsed = perf_counter() - start
         print(f"Loaded map in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
 
-    def dda(self, origin: pygame.Vector3, dir: pygame.Vector3) -> HitInfo:
+    def dda(self,
+            origin: pygame.Vector3,
+            dir: pygame.Vector3,
+            max_steps: int = 256
+            ) -> HitInfo:
         """
         Cast a ray into the world and collect hit information using DDA.
 
@@ -106,10 +110,9 @@ class VoxelWorld:
             Origin of the ray.
         dir
             Direction of the ray.
+        max_steps
+            Maximum traversal steps before terminating. 
         """
-        # defined in shader
-        MAX_DDA_STEPS = 34
-        
         voxel = origin / self.voxel_size
         voxel.x = floor(voxel.x)
         voxel.y = floor(voxel.y)
@@ -146,7 +149,7 @@ class VoxelWorld:
         normal = pygame.Vector3(0.0)
 
         # traverse
-        for i in range(MAX_DDA_STEPS):
+        for i in range(max_steps):
             hit_t = min(t_max.x, t_max.y, t_max.z)
             
             if t_max.x < t_max.y and t_max.x < t_max.z:

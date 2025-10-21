@@ -12,9 +12,11 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Filmic tonemapping
 - Color grading postprocessing
 - Simple PBR-ish material pipeline with texture maps
+  - Albedo, diffuse, emission, specular and roughness.
 - Custome skydome
 - Progressive rendering with frame accumulation
 - Russian Roulette path termination
+- Anti-aliasing with jitter sampling
 
 **Roadmap:**
 - Disney BRDF

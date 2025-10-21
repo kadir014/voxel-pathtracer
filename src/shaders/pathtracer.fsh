@@ -22,7 +22,7 @@
 #define EPSILON 0.0005
 #define BIG_VALUE 10000.0
 #define BLUENOISE_SIZE 1024
-#define MAX_DDA_STEPS 56
+#define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
 #define EMISSIVE_MULT 2.7
 
 
