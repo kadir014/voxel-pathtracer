@@ -14,8 +14,8 @@ from dataclasses import dataclass
 import pygame
 import imgui
 
-from src.common import MAX_RAYS_PER_PIXEL, MAX_BOUNCES
-from src.camera import Camera
+from src.common import MAX_RAYS_PER_PIXEL, MAX_BOUNCES, HIDE_HW_INFO
+from src.camera import Camera, CameraMode
 from src.world import VoxelWorld
 from src.renderer import Renderer
 from src.gui import ImguiPygameModernGLAbomination
@@ -73,7 +73,8 @@ class App:
         self.gui = ImguiPygameModernGLAbomination(self._resolution, self.renderer._context)
 
         self.camera.position = pygame.Vector3(40, 30, -20)
-        self.camera.look_at = pygame.Vector3(40, 0, 40)
+        self.camera.yaw = 90
+        self.camera.pitch = -30
         self.camera.update()
 
         self.cpu_info = get_cpu_info()
@@ -216,7 +217,7 @@ class App:
                     else:
                         block = self.current_block
 
-                    direction = (self.camera.look_at - self.camera.position).normalize()
+                    direction = self.camera.front
                     hitinfo = self.dda(self.camera.position, direction)
 
                     voxel = pygame.Vector3(*hitinfo.voxel)
@@ -287,8 +288,12 @@ class App:
 
             if pygame.mouse.get_relative_mode():
                 rot = mouse_rel * mouse_sensitivity
-                self.camera.rotate_yaw(-rot.x)
-                self.camera.rotate_pitch(rot.y)
+                self.camera.yaw += rot.x
+
+                if self.camera.mode == CameraMode.FIRST_PERSON:
+                    self.camera.pitch -= rot.y
+                else:
+                    self.camera.pitch += rot.y
 
                 if abs(mouse_rel.x) > 0.0 or abs(mouse_rel.y) > 0.0:
                     should_reset_acc = True
@@ -305,10 +310,16 @@ class App:
             mov = 40.0 * dt
 
             if keys[pygame.K_w]:
-                self.camera.move(mov)
+                if self.camera.mode == CameraMode.FIRST_PERSON:
+                    self.camera.move(mov)
+                else:
+                    self.camera.distance -= mov * 2.0
 
             if keys[pygame.K_s]:
-                self.camera.move(-mov)
+                if self.camera.mode == CameraMode.FIRST_PERSON:
+                    self.camera.move(-mov)
+                else:
+                    self.camera.distance += mov * 2.0
 
             if keys[pygame.K_a]:
                 self.camera.strafe(-mov)
@@ -317,18 +328,24 @@ class App:
                 self.camera.strafe(mov)
 
             if keys[pygame.K_e]:
-                self.camera.position -= pygame.Vector3(0.0, mov, 0.0)
-                self.camera.look_at -= pygame.Vector3(0.0, mov, 0.0)
+                self.camera.position -= self.camera.up * mov
 
             if keys[pygame.K_q]:
-                self.camera.position += pygame.Vector3(0.0, mov, 0.0)
-                self.camera.look_at += pygame.Vector3(0.0, mov, 0.0)
+                self.camera.position += self.camera.up * mov
 
             if keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d] or keys[pygame.K_e] or keys[pygame.K_q]:
                 should_reset_acc = True
 
             if should_reset_acc:
                 self.renderer.settings.acc_frame = 0
+
+            if self.camera.mode == CameraMode.ORBIT:
+                world_center = pygame.Vector3(
+                    self.world.dimensions[0] * self.world.voxel_size * 0.5,
+                    self.world.dimensions[1] * self.world.voxel_size * 0.5,
+                    self.world.dimensions[2] * self.world.voxel_size * 0.5
+                )
+                self.camera.target = world_center
 
             self.camera.update()
             self._update_camera_uniform()
@@ -342,8 +359,11 @@ class App:
             imgui.text(f"FPS: {round(self.clock.get_fps())}")
             imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
             imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
-            imgui.text(f"CPU: {self.cpu_info['name']}")
-            imgui.text(f"GPU: {self.gpu_info['name']}")
+
+            if not HIDE_HW_INFO:
+                imgui.text(f"CPU: {self.cpu_info['name']}")
+                imgui.text(f"GPU: {self.gpu_info['name']}")
+
             imgui.text(f"Accumulation: {self.renderer.settings.acc_frame}")
 
             if imgui.tree_node("Post-processing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
@@ -382,9 +402,10 @@ class App:
                 imgui.tree_pop()
 
             if imgui.tree_node("Camera", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-                _, self.camera.focal_length = imgui.slider_float("Focal length", self.camera.focal_length, 0.0, 0.5, format="%.4f")
-                _, self.camera.horizontal_size = imgui.slider_float("Horizontal size", self.camera.horizontal_size, 0.0, 0.5, format="%.4f")
-                _, mouse_sensitivity = imgui.slider_float("Mouse sensitivity", mouse_sensitivity, 0.01, 0.3, format="%.4f")
+                _, self.camera.fov = imgui.slider_float("FOV", self.camera.fov, 0.0, 180.0, format="%.4f")
+                _, mouse_sensitivity = imgui.slider_float("Sensitivity", mouse_sensitivity, 0.01, 0.3, format="%.4f")
+                _, camera_mode_int = imgui.slider_int("Mode", self.camera.mode.value, 0, 1, format=self.camera.mode.name)
+                self.camera.mode = CameraMode(camera_mode_int)
 
                 imgui.tree_pop()
 
