@@ -17,10 +17,9 @@
 #version 460
 
 
-#define PI 3.141592653589793238462643383279
-#define TAU 6.283185307179586476925286766559
-#define EPSILON 0.0005
-#define BIG_VALUE 10000.0
+//#include src/shaders/common.glsl
+
+
 #define BLUENOISE_SIZE 1024
 #define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
 #define EMISSIVE_MULT 2.7
@@ -103,19 +102,19 @@ HitInfo dda(Ray ray) {
     );
 
     vec3 t_max = next_boundary - ray.origin;
-    if (ray.dir.x == 0.0) t_max.x = BIG_VALUE;
+    if (ray.dir.x == 0.0) t_max.x = HIGHP_FLT_MAX;
     else t_max.x /= ray.dir.x;
-    if (ray.dir.y == 0.0) t_max.y = BIG_VALUE;
+    if (ray.dir.y == 0.0) t_max.y = HIGHP_FLT_MAX;
     else t_max.y /= ray.dir.y;
-    if (ray.dir.z == 0.0) t_max.z = BIG_VALUE;
+    if (ray.dir.z == 0.0) t_max.z = HIGHP_FLT_MAX;
     else t_max.z /= ray.dir.z;
 
     vec3 t_delta = vec3(0.0);
-    if (ray.dir.x == 0.0) t_delta.x = BIG_VALUE;
+    if (ray.dir.x == 0.0) t_delta.x = HIGHP_FLT_MAX;
     else t_delta.x = abs(u_voxel_size / ray.dir.x);
-    if (ray.dir.y == 0.0) t_delta.y = BIG_VALUE;
+    if (ray.dir.y == 0.0) t_delta.y = HIGHP_FLT_MAX;
     else t_delta.y = abs(u_voxel_size / ray.dir.y);
-    if (ray.dir.z == 0.0) t_delta.z = BIG_VALUE;
+    if (ray.dir.z == 0.0) t_delta.z = HIGHP_FLT_MAX;
     else t_delta.z = abs(u_voxel_size / ray.dir.z);
 
     // Traverse world texture
@@ -399,8 +398,9 @@ void main() {
 
         vec2 ray_pos = v_uv * 2.0 - 1.0;
 
-        if (u_antialiasing == 1) {
+        if (u_antialiasing == ANTIALIASING_JITTERSAMPLING) {
             /*
+                Jitter sampling:
                 Do antialiasing by sampling the rays with a small amount of jitter.
                 This is most effective if progressive rendering is enabled so
                 the temporal jitter gets accumulated and averaged.

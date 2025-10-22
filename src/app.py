@@ -8,13 +8,10 @@
 
 """
 
-from math import floor
-from dataclasses import dataclass
-
 import pygame
 import imgui
 
-from src.common import MAX_RAYS_PER_PIXEL, MAX_BOUNCES, HIDE_HW_INFO
+from src.common import MAX_BOUNCES, HIDE_HW_INFO
 from src.camera import Camera, CameraMode
 from src.world import VoxelWorld
 from src.renderer import Renderer
@@ -103,6 +100,9 @@ class App:
         pygame.mouse.set_relative_mode(True)
         mouse_sensitivity = 0.1
 
+        color_profiles = ["Nice-ish", "Zeroes"]
+        current_color_profile = 0
+
         while self.is_running:
             dt = self.clock.tick(self.target_fps) * 0.001
 
@@ -155,11 +155,8 @@ class App:
                     if event.key == pygame.K_ESCAPE:
                         self.is_running = False
 
-                    elif event.key == pygame.K_r:
-                        should_reset_acc = True
-
                     elif event.key == pygame.K_LALT:
-                        pygame.mouse.set_relative_mode(False)
+                        pygame.mouse.set_relative_mode(not pygame.mouse.get_relative_mode())
 
                     elif event.key == pygame.K_F12:
                         self.renderer.high_quality_snapshot()
@@ -200,10 +197,6 @@ class App:
                     elif event.key == pygame.K_7:
                         self.current_block = 7
                         self.renderer.update_ui(self.current_block - 1)
-                
-                elif event.type == pygame.KEYUP:
-                    if event.key == pygame.K_LALT:
-                        pygame.mouse.set_relative_mode(True)
 
             # Only process UI when mouse is enabled
             # otherwise you can accidentally alter widgets when roaming around
@@ -232,6 +225,9 @@ class App:
                     should_reset_acc = True
 
             keys = pygame.key.get_pressed()
+
+            if keys[pygame.K_r]:
+                should_reset_acc = True
 
             mov = 40.0 * dt
 
@@ -279,7 +275,7 @@ class App:
             self.renderer.render()
 
             imgui.new_frame()
-            imgui.begin("Nice window", True, flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+            imgui.begin("Settings (press ALT)", True, flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
             imgui.set_window_position(0, 0)
 
             imgui.text(f"FPS: {round(self.clock.get_fps())}")
@@ -292,12 +288,23 @@ class App:
 
             imgui.text(f"Accumulation: {self.renderer.settings.acc_frame}")
 
-            if imgui.tree_node("Post-processing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+            if imgui.tree_node("Color grading", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.postprocessing = imgui.checkbox("Enable post-processing", self.renderer.settings.postprocessing)
-                _, self.renderer.settings.exposure  = imgui.slider_float("Exposure", self.renderer.settings.exposure, -5.0, 5.0, format="%.1f")
+
+                clicked, current_color_profile = imgui.combo(
+                    "Color profile", current_color_profile, color_profiles
+                )
+
+                if clicked:
+                    if current_color_profile == 0:
+                        self.renderer.settings.color_profile_custom()
+                    elif current_color_profile == 1:
+                        self.renderer.settings.color_profile_zero()
 
                 tm_name = ("None", "ACES Filmic")[self.renderer.settings.tonemapper]
                 _, self.renderer.settings.tonemapper = imgui.slider_int(f"Tonemapper", self.renderer.settings.tonemapper, 0, 1, format=tm_name)
+
+                _, self.renderer.settings.exposure  = imgui.slider_float("Exposure", self.renderer.settings.exposure, -5.0, 5.0, format="%.1f")
 
                 _, self.renderer.settings.brightness = imgui.slider_float("Brightness", self.renderer.settings.brightness, -0.5, 0.5, format="%.4f")
                 _, self.renderer.settings.contrast = imgui.slider_float("Contrast", self.renderer.settings.contrast, 0.0, 1.2, format="%.4f")
@@ -306,7 +313,22 @@ class App:
                 imgui.tree_pop()
 
             if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-                _, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, MAX_RAYS_PER_PIXEL)
+                #_, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, MAX_RAYS_PER_PIXEL)
+
+                spp_dec = imgui.arrow_button("decrease-samples", imgui.DIRECTION_LEFT)
+                imgui.same_line()
+                imgui.text(f"{self.renderer.settings.ray_count}")
+                imgui.same_line()
+                spp_inc = imgui.arrow_button("increase-samples", imgui.DIRECTION_RIGHT)
+                imgui.same_line()
+                imgui.text("Rays/pixel")
+
+                if spp_inc:
+                    self.renderer.settings.increase_ray_counts()
+
+                if spp_dec:
+                    self.renderer.settings.decrease_ray_counts()
+
                 _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, MAX_BOUNCES)
 
                 noise_name = ("None", "Mulberry32 PRNG", "Bluenoise")[self.renderer.settings.noise_method]
@@ -347,7 +369,7 @@ class App:
                 imgui.text(f"[Q & E] to move vertically")
                 imgui.text(f"[1 - 9] to change current block")
                 imgui.text(f"[R] to reset accumulation")
-                imgui.text(f"[ALT] to use enable cursor and use UI")
+                imgui.text(f"[ALT] to use toggle cursor and use UI")
                 imgui.text(f"[F12] to take high-quality render snapshot")
                 imgui.text(f"[F1] to save map onto 'map.save' file")
                 imgui.text(f"[F2] to load map from 'map.save' file")

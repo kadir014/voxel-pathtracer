@@ -8,13 +8,18 @@
 
 """
 
+from typing import TextIO
+
+import os
 from array import array
 from time import perf_counter
+from math import log
 
 import pygame
 import moderngl
 
 from src.world import BLOCK_IDS, VoxelWorld
+from src.common import MAX_RAYS_PER_PIXEL
 
 
 class RendererSettings:
@@ -23,6 +28,9 @@ class RendererSettings:
 
         self.highquality_ray_count = 512
         self.highquality_bounces = 12
+
+        # Only use power of 2s for samples (ray count per pixel)
+        self.only_power_of_2s = True
 
         self.acc_frame = 0
 
@@ -80,6 +88,16 @@ class RendererSettings:
     
     @ray_count.setter
     def ray_count(self, value: int) -> None:
+        if value < 1:
+            return
+        
+        if value > MAX_RAYS_PER_PIXEL:
+            return
+
+        if self.only_power_of_2s:
+            nearest_power_of_2 = round(log(value, 2))
+            value = int(2.0 ** nearest_power_of_2)
+
         self.__renderer._pt_program["u_ray_count"].value = value
 
     @property
@@ -141,6 +159,74 @@ class RendererSettings:
     def antialiasing(self, value: int) -> None:
         self.__renderer._pt_program["u_antialiasing"].value = value
 
+    def increase_ray_counts(self) -> None:
+        """ Increase rays/pixel by one step. """
+
+        if not self.only_power_of_2s:
+            self.ray_count += 1
+
+        else:
+            power = log(self.ray_count, 2)
+            power += 1
+            self.ray_count = 2.0 ** power
+
+    def decrease_ray_counts(self) -> None:
+        """ Decrease rays/pixel by one step. """
+
+        if not self.only_power_of_2s:
+            self.ray_count -= 1
+
+        else:
+            power = log(self.ray_count, 2)
+            power -= 1
+            self.ray_count = 2.0 ** power
+    
+    def color_profile_custom(self) -> None:
+        """ Set to custom color profile which I thought looked good with ACES. """
+
+        self.exposure = -1.993
+        self.brightness = 0.00435
+        self.contrast = 1.0212
+        self.saturation = 1.235
+
+    def color_profile_zero(self) -> None:
+        """ Set color grading to defaults. """
+
+        self.exposure = 0.0
+        self.brightness = 0.0
+        self.contrast = 1.0
+        self.saturation = 1.0
+
+
+class ShaderPatcher:
+    def __init__(self) -> None:
+        self.include_pattern = "//#include"
+
+        self.shaders: dict[str, str] = {}
+
+    def patch_stream(self, stream: TextIO) -> str:
+        new_content = ""
+
+        for line in stream.read().split("\n"):
+            line = line.strip()
+
+            if line.startswith(self.include_pattern):
+                path = " ".join(line.split(" ")[1:])
+
+                with open(path, "r", encoding="utf-8") as f:
+                    include_content = f.read()
+
+                new_content += include_content
+
+            else:
+                new_content += line + "\n"
+
+        return new_content
+
+    def patch_file(self, name: str, filepath: str) -> None:
+        with open(filepath, "r", encoding="utf-8") as f:
+            self.shaders[name] = self.patch_stream(f)
+
 
 class Renderer:
     """
@@ -173,6 +259,12 @@ class Renderer:
         }
         """
 
+        self.patcher = ShaderPatcher()
+        self.patcher.patch_file("post.fsh", "src/shaders/post.fsh")
+        self.patcher.patch_file("upscale.fsh", "src/shaders/upscale.fsh")
+        self.patcher.patch_file("pathtracer.fsh", "src/shaders/pathtracer.fsh")
+        print(self.patcher.shaders["pathtracer.fsh"])
+
         # All VAOs will use the same buffers since they are all just plain screen quads
         self._vbo = self.create_buffer_object([-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0])
         self._uvbo = self.create_buffer_object([0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
@@ -180,14 +272,10 @@ class Renderer:
 
         self._post_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=open("src/shaders/post.fsh").read()
+            fragment_shader=self.patcher.shaders["post.fsh"]
         )
         self._post_program["u_enable_post"] = True
         self._post_program["u_tonemapper"] = 1
-        self._post_program["u_exposure"] = -1.993
-        self._post_program["u_brightness"] = 0.0071
-        self._post_program["u_contrast"] = 1.0212
-        self._post_program["u_saturation"] = 1.225
 
         self._post_vao = self._context.vertex_array(
             self._post_program,
@@ -200,7 +288,7 @@ class Renderer:
 
         self._pt_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=open("src/shaders/pathtracer.fsh").read()
+            fragment_shader=self.patcher.shaders["pathtracer.fsh"]
         )
         self._pt_program["s_bluenoise"] = 0
         self._pt_program["s_grid"] = 1
@@ -233,7 +321,7 @@ class Renderer:
 
         self._upscale_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=open("src/shaders/upscale.fsh").read()
+            fragment_shader=self.patcher.shaders["upscale.fsh"]
         )
         self._upscale_program["s_texture"] = 0
         self._upscale_program["s_overlay"] = 1
@@ -271,6 +359,7 @@ class Renderer:
 
 
         self.settings = RendererSettings(self)
+        self.settings.color_profile_custom()
 
 
         sky_surf = pygame.image.load("data/qwantani_dusk_2_puresky.png")
@@ -700,7 +789,7 @@ class Renderer:
         old_bounces = self.settings.bounces
         old_enable_accumulation = self.settings.enable_accumulation
 
-        self.settings.ray_count = self.settings.highquality_ray_count
+        self._pt_program["u_ray_count"].value = self.settings.highquality_ray_count
         self.settings.bounces = self.settings.highquality_bounces
         self.settings.enable_accumulation = False
 
@@ -713,7 +802,7 @@ class Renderer:
         )
         pygame.image.save(pygame.transform.flip(surf, False, True), "snapshot.png")
 
-        self.settings.ray_count = old_ray_count
+        self._pt_program["u_ray_count"].value = old_ray_count
         self.settings.bounces = old_bounces
         self.settings.enable_accumulation = old_enable_accumulation
 

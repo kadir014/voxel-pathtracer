@@ -27,5 +27,5 @@ HIDE_HW_INFO = False
 # These are set so people don't fry their GPU accidentaly
 # increase at your own risk
 
-MAX_RAYS_PER_PIXEL = 30
+MAX_RAYS_PER_PIXEL = 2 ** 5
 MAX_BOUNCES = 5
