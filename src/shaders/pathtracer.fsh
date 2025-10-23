@@ -25,8 +25,8 @@
 
 
 in vec2 v_uv;
-layout(location = 0) out vec4 f_color;   // COLOR_ATTACHMENT0
-layout(location = 1) out vec4 f_normal;  // COLOR_ATTACHMENT1
+layout(location = 0) out vec4 f_color;
+layout(location = 1) out vec4 f_normal;
 
 
 uniform int u_ray_count;
@@ -37,7 +37,6 @@ uniform float u_voxel_size;
 uniform bool u_enable_roulette;
 uniform bool u_enable_sky_texture;
 uniform vec3 u_sky_color;
-uniform uint u_acc_frame;
 uniform bool u_enable_accumulation;
 uniform int u_antialiasing;
 
@@ -54,6 +53,10 @@ layout(std430, binding = 0) readonly buffer HeitzLayout {
     int heitz_ranking[131072];
     int heitz_scrambling[131072];
     int heitz_sobol[65536];
+};
+
+layout(std430, binding = 2) buffer AccLayout {
+    int accumulations[1920 * 1080];
 };
 
 
@@ -245,8 +248,8 @@ struct HeitzState {
 HeitzState heitz_state;
 float heitz_sample() {
     // TODO: EXPERIMENTAL!, progressive rendering should get better?
-    int HEITZ_CHOOSE_PRNG_AFTER_ACCUMULATED_FRAMES = 16;
-    if (u_acc_frame > HEITZ_CHOOSE_PRNG_AFTER_ACCUMULATED_FRAMES) {
+    // int HEITZ_CHOOSE_PRNG_AFTER_ACCUMULATED_FRAMES = 16;
+    if (heitz_state.dim > 8) {
         return prng();
     }
 
@@ -509,7 +512,7 @@ void main() {
     for (int sample_i = 0; sample_i < u_ray_count; sample_i++) {
 
         // Initialize PRNGs
-        int temporal_frame_i = int(u_acc_frame);
+        int temporal_frame_i = accumulations[pixel.x + pixel.y * 1920];
         prng_seed(pixel, sample_i, temporal_frame_i);
         heitz_seed(pixel, sample_i, temporal_frame_i);
 
@@ -518,6 +521,7 @@ void main() {
         if (u_antialiasing == ANTIALIASING_JITTERSAMPLING) {
             /*
                 Jitter sampling:
+                TODO: DOESN'T WORK WITH TEMPORAL ACCUMULATION
                 Do antialiasing by sampling the rays with a small amount of jitter.
                 This is most effective if progressive rendering is enabled so
                 the temporal jitter gets accumulated and averaged.
@@ -540,11 +544,13 @@ void main() {
 
     f_normal = vec4(0.0);
 
+    float curr_depth = length(primary_hit.point - u_camera.position);
+
     if (u_enable_accumulation) {
         vec3 prev_uv = reproject(primary_hit.point);
 
         if (primary_hit.hit && prev_uv.z > 0.0 && (prev_uv.x > 0.0 && prev_uv.x < 1.0 && prev_uv.y > 0.0 && prev_uv.y < 1.0)) {
-            f_normal = vec4(primary_hit.normal, 0.0);
+            f_normal = vec4(primary_hit.normal, curr_depth);
 
             // Normal xyz  depth a
             vec4 _previous_normal_sample = texture(s_previous_normal, prev_uv.xy);
@@ -552,22 +558,34 @@ void main() {
             float previous_depth = _previous_normal_sample.a;
 
             float normal_diff = dot(primary_hit.normal, previous_normal);
-            if (normal_diff > 0.97) {
-                vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
+            //float depth_diff = abs(curr_depth - previous_depth);
+            float rel_depth_diff = abs(curr_depth - previous_depth) / max(curr_depth, previous_depth);
 
+            if (normal_diff > 0.97 && rel_depth_diff < 0.12) {
+                vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
+                
                 // Temporal blending weight
-                float weight = 1.0 / float(u_acc_frame + 1u);
+                int acc = accumulations[pixel.x + pixel.y * 1920];
+                float capped_frame = min(float(acc), 16.0);
+                float weight = 1.0 / (capped_frame + 1.0);
 
                 // Blend current and reprojected colors
                 final_color = mix(previous_color, final_color, weight);
+
+                accumulations[pixel.x + pixel.y * 1920] += 1;
+
             }
             else {
                 final_color = final_color;
+                //final_color = vec3(0.0, 0.2, 0.0);
+                accumulations[pixel.x + pixel.y * 1920] = 0;
             }
         }
         else {
-            // No valid history — reset accumulation
+            // No valid history reset accumulation
             final_color = final_color;
+            //final_color = vec3(0.0, 0.2, 0.0);
+            accumulations[pixel.x + pixel.y * 1920] = 0;
         }
     }
 

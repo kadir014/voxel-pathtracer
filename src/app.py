@@ -307,7 +307,7 @@ class App:
                 #should_reset_acc = True
 
             if should_reset_acc:
-                self.renderer.settings.acc_frame = 0
+                self.renderer.clear_accumulation()
 
             if self.camera.mode == CameraMode.ORBIT:
                 world_center = pygame.Vector3(
@@ -330,7 +330,6 @@ class App:
                 imgui.text(f"FPS: {round(self.clock.get_fps())}")
                 imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
                 imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
-                imgui.text(f"Accumulation: {self.renderer.settings.acc_frame}")
 
                 if not HIDE_HW_INFO:
                     imgui.text(f"CPU: {self.cpu_info['name']}")
@@ -373,8 +372,6 @@ class App:
                 imgui.tree_pop()
 
             if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-                #_, self.renderer.settings.ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.ray_count, 1, MAX_RAYS_PER_PIXEL)
-
                 spp_dec = imgui.arrow_button("decrease-samples", imgui.DIRECTION_LEFT)
                 imgui.same_line()
                 imgui.text(f"{self.renderer.settings.ray_count}")

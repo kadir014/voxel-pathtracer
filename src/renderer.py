@@ -68,8 +68,6 @@ class RendererSettings:
         # Only use power of 2s for samples (ray count per pixel)
         self.only_power_of_2s = True
 
-        self.acc_frame = 0
-
     @property
     def postprocessing(self) -> bool:
         return self.__renderer._post_program["u_enable_post"].value
@@ -206,7 +204,7 @@ class RendererSettings:
     @enable_accumulation.setter
     def enable_accumulation(self, value: bool) -> None:
         if self.__renderer._pt_program["u_enable_accumulation"].value != value:
-            self.acc_frame = 0
+            self.__renderer.clear_accumulation()
 
         self.__renderer._pt_program["u_enable_accumulation"].value = value
 
@@ -373,7 +371,6 @@ class Renderer:
         self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = self._world.voxel_size
-        self._pt_program["u_acc_frame"] = 0
         self._pt_program["u_enable_accumulation"] = True
         self._pt_program["u_antialiasing"] = 0
 
@@ -421,9 +418,9 @@ class Renderer:
         )
 
         self._pathtracer_target_normal0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
-        self._pathtracer_target_normal0.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_target_normal0.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_normal1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
-        self._pathtracer_target_normal1.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_target_normal1.filter = (moderngl.LINEAR, moderngl.LINEAR)
         # Note: data type being f4 lets us store colors in HDR
         # Alpha channel in pathtracing textures is for luminance
         self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
@@ -453,6 +450,12 @@ class Renderer:
         self._exposure_layout_buf = self._context.buffer(reserve=exposure_total_size, dynamic=True)
         self._exposure_layout_buf.write(pack("Iff", 0, 0.001, 10.0), 0)
         self._exposure_layout_buf.bind_to_storage_buffer(1)
+
+
+        acc_total_size = 1920 * 1080 * 4
+        self._acc_layout_buf = self._context.buffer(reserve=acc_total_size, dynamic=True)
+        self._acc_layout_buf.bind_to_storage_buffer(2)
+        self.clear_accumulation()
 
 
         self.settings = RendererSettings(self)
@@ -562,6 +565,8 @@ class Renderer:
 
         self.update_ui()
 
+        self.pingpong_frame = 0
+
     def __del__(self) -> None:
         self._context.release()
 
@@ -617,6 +622,9 @@ class Renderer:
 
         elapsed = perf_counter() - start
         print(f"Wrote Heitz data for {spp}spp onto GPU in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+
+    def clear_accumulation(self) -> None:
+        self._acc_layout_buf.clear()
     
     def update_ui_surface(self, hotbar: int = 0) -> None:
         self.ui_surface.fill((0, 0, 0, 0))
@@ -895,8 +903,6 @@ class Renderer:
 
         self._context.disable(moderngl.BLEND)
 
-        self._pt_program["u_acc_frame"].value = self.settings.acc_frame
-
         targets = (self._pathtracer_target_texture0, self._pathtracer_target_texture1)
         fbos = (self._pathtracer_fbo0, self._pathtracer_fbo1)
         normals = (self._pathtracer_target_normal0, self._pathtracer_target_normal1)
@@ -911,7 +917,7 @@ class Renderer:
         # current target -> 1
         # previous target -> 0
 
-        frame = self.settings.acc_frame
+        frame = self.pingpong_frame
         current_fbo = fbos[frame % 2]
         previous_normal = normals[(frame + 1 ) % 2]
         current_target = targets[frame % 2]
@@ -957,7 +963,9 @@ class Renderer:
         self._upscale_vao.render()
 
         if self.settings.enable_accumulation:
-            self.settings.acc_frame += 1
+            self.pingpong_frame += 1
+        else:
+            self.pingpong_frame = 0
 
     def high_quality_snapshot(self) -> None:
         """ Render with temporary high quality settings and save a snapshot. """
