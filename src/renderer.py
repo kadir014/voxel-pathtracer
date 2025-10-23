@@ -11,6 +11,7 @@
 from typing import TextIO
 
 from array import array
+from struct import unpack, pack
 from time import perf_counter
 from math import log
 
@@ -94,6 +95,26 @@ class RendererSettings:
         self.__renderer._post_program["u_exposure"].value = value
 
     @property
+    def enable_eye_adaptation(self) -> bool:
+        data = self.__renderer._exposure_layout_buf.read(4, 4 * 0)
+        return unpack("I", data)[0]
+    
+    @enable_eye_adaptation.setter
+    def enable_eye_adaptation(self, value: bool) -> None:
+        data = pack("I", value)
+        self.__renderer._exposure_layout_buf.write(data, 0)
+
+    @property
+    def adapted_exposure(self) -> float:
+        data = self.__renderer._exposure_layout_buf.read(4, 4 * 2)
+        return unpack("f", data)[0]
+    
+    @property
+    def adaptation_speed(self) -> float:
+        data = self.__renderer._exposure_layout_buf.read(4, 4 * 1)
+        return unpack("f", data)[0]
+
+    @property
     def brightness(self) -> float:
         return self.__renderer._post_program["u_brightness"].value
     
@@ -135,8 +156,8 @@ class RendererSettings:
 
         self.__renderer._pt_program["u_ray_count"].value = value
 
-        if self.noise_method == 2:
-            self.__renderer.write_heinz_data()
+        #if self.noise_method == 2:
+        self.__renderer.write_heinz_data()
 
     @property
     def bounces(self) -> int:
@@ -343,9 +364,10 @@ class Renderer:
         self._pt_program["s_roughness_atlas"] = 5
         self._pt_program["s_reflectivity_atlas"] = 6
         self._pt_program["s_previous_frame"] = 7
+        self._pt_program["s_previous_normal"] = 8
         self._pt_program["u_ray_count"] = 8
         self._pt_program["u_bounces"] = 3
-        self._pt_program["u_noise_method"] = 1
+        self._pt_program["u_noise_method"] = 2
         self._pt_program["u_enable_roulette"] = False
         self._pt_program["u_enable_sky_texture"] = True
         self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
@@ -353,7 +375,7 @@ class Renderer:
         self._pt_program["u_voxel_size"] = self._world.voxel_size
         self._pt_program["u_acc_frame"] = 0
         self._pt_program["u_enable_accumulation"] = True
-        self._pt_program["u_antialiasing"] = 1
+        self._pt_program["u_antialiasing"] = 0
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -398,14 +420,23 @@ class Renderer:
             self._ibo
         )
 
+        self._pathtracer_target_normal0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
+        self._pathtracer_target_normal0.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_target_normal1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
+        self._pathtracer_target_normal1.filter = (moderngl.NEAREST, moderngl.NEAREST)
         # Note: data type being f4 lets us store colors in HDR
         # Alpha channel in pathtracing textures is for luminance
         self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture0.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture0,))
+        #self._pathtracer_target_texture0.repeat_x = False
+        #self._pathtracer_target_texture0.repeat_y = False
+        self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture0,self._pathtracer_target_normal0))
         self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture1.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture1,))
+        #self._pathtracer_target_texture1.repeat_x = False
+        #self._pathtracer_target_texture1.repeat_y = False
+        self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture1,self._pathtracer_target_normal1))
+
 
         self._fxaa_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
         self._fxaa_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
@@ -414,6 +445,14 @@ class Renderer:
         self._post_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
         self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._post_fbo = self._context.framebuffer(color_attachments=(self._post_target_texture,))
+
+
+        # The post-processing shader will rewrite the adapted exposure each frame
+        # so make the buffer dynamic
+        exposure_total_size = 4 * 4 * 4
+        self._exposure_layout_buf = self._context.buffer(reserve=exposure_total_size, dynamic=True)
+        self._exposure_layout_buf.write(pack("Iff", 0, 0.001, 10.0), 0)
+        self._exposure_layout_buf.bind_to_storage_buffer(1)
 
 
         self.settings = RendererSettings(self)
@@ -577,7 +616,7 @@ class Renderer:
         self.heinz_layout_buf.write(buf_data)
 
         elapsed = perf_counter() - start
-        print(f"Wrote Heitz data onto GPU in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+        print(f"Wrote Heitz data for {spp}spp onto GPU in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
     
     def update_ui_surface(self, hotbar: int = 0) -> None:
         self.ui_surface.fill((0, 0, 0, 0))
@@ -860,6 +899,7 @@ class Renderer:
 
         targets = (self._pathtracer_target_texture0, self._pathtracer_target_texture1)
         fbos = (self._pathtracer_fbo0, self._pathtracer_fbo1)
+        normals = (self._pathtracer_target_normal0, self._pathtracer_target_normal1)
 
         # frame 0:
         # current fbo -> 0
@@ -873,6 +913,7 @@ class Renderer:
 
         frame = self.settings.acc_frame
         current_fbo = fbos[frame % 2]
+        previous_normal = normals[(frame + 1 ) % 2]
         current_target = targets[frame % 2]
         previous_target = targets[(frame + 1 ) % 2]
 
@@ -884,7 +925,14 @@ class Renderer:
         self.roughness_atlas_tex.use(5)
         self.reflectivity_atlas_tex.use(6)
         previous_target.use(7)
+        previous_normal.use(8)
         self._pt_vao.render()
+
+        if (self.settings.noise_method == 2):
+            current_target.build_mipmaps()
+            current_target.filter = (moderngl.NEAREST_MIPMAP_NEAREST, moderngl.NEAREST_MIPMAP_NEAREST)
+        else:
+            current_target.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
         if self.settings.antialiasing in (0, 1):
             self._post_fbo.use()
@@ -924,8 +972,8 @@ class Renderer:
         self.settings.enable_accumulation = False
 
         # Manually invoke this since we don't interact with RendererSettings property
-        if self.settings.noise_method == 2:
-            self.write_heinz_data()
+        #if self.settings.noise_method == 2:
+        self.write_heinz_data()
 
         self.render(ui=False)
 

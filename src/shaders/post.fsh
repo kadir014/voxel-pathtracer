@@ -29,8 +29,11 @@ uniform float u_brightness;
 uniform float u_contrast;
 uniform float u_saturation;
 
-#define GAMMA 0.45454545454545454545454545454545 // 1.0 / 2.2
-#define SQRT2 1.4142135623730950488016887242097 // sqrt(2.0)
+layout(std430, binding = 1) buffer ExposureLayout {
+    bool u_enable_eye_adaptation;
+    float u_adaptation_speed;
+    float u_adapted_exposure;
+};
 
 
 /*
@@ -62,6 +65,32 @@ void main() {
         */
 
         /*
+            Eye adaptation
+            --------------
+            Adjust the actual exposure applied to the HDR color based on the
+            average luminecence of the scene.
+
+            Interpolate between current and target exposure slowly so it mimics
+            pupils adjusting to different brightness levels in real life.
+        */
+        float final_exposure = 0.0;
+        if (u_enable_eye_adaptation) {
+            // Lowest mipmap level -> log2(max(width, height))
+            float min_mip = 10.0;
+            float luma = textureLod(s_texture, v_uv, min_mip).a;
+
+            // Adaptation speed is framerate-dependant, you have to explicitly adjust it
+            float target_exposure = log2(0.01 / max(luma, 1e-4)) + u_exposure;
+            u_adapted_exposure = mix(u_adapted_exposure, target_exposure, u_adaptation_speed);
+            u_adapted_exposure = clamp(u_adapted_exposure, -30.0, 10.0);
+
+            final_exposure = u_adapted_exposure;
+        }
+        else {
+            final_exposure = u_exposure;
+        }
+
+        /*
             Exposure
             --------
             Each value adds one half-stop. 0.0 is neutral exposure.
@@ -69,7 +98,7 @@ void main() {
             - EV = 0.0 -> Neutral
             - EV = 1.0 -> 1.4x brighter
         */
-        color *= pow(SQRT2, u_exposure);
+        color *= pow(SQRT2, final_exposure);
 
         /*
             Tonemapping

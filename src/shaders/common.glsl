@@ -11,8 +11,11 @@
 
 #define PI      3.141592653589793238462643383279
 #define TAU     6.283185307179586476925286766559
-#define INV_PI  0.318309886183790671537767526745
-#define INV_TAU 0.159154943091895335768883763372
+#define INV_PI  0.318309886183790671537767526745 // 1.0 / pi
+#define INV_TAU 0.159154943091895335768883763372 // 1.0 / tau
+
+#define GAMMA 0.45454545454545454545454545454545 // 1.0 / 2.2
+#define SQRT2 1.4142135623730950488016887242097 // sqrt(2.0)
 
 
 #define EPSILON 0.0005
@@ -47,7 +50,7 @@
     Weights are taken from https://en.wikipedia.org/wiki/Relative_luminance
 */
 vec3 luminance(vec3 color) {
-    vec3 y = vec3(0.299, 0.587, 0.114);
+    vec3 y = vec3(0.2125, 0.7154, 0.0721);
     return vec3(dot(color, y));
 }
 

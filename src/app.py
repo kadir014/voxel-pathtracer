@@ -60,6 +60,7 @@ class App:
         self.camera.yaw = 90
         self.camera.pitch = -30
         self.camera.update()
+        self.prev_camera: Camera
 
         self.cpu_info = get_cpu_info()
         self.gpu_info = get_gpu_info(self.renderer._context)
@@ -117,6 +118,27 @@ class App:
             self.camera.v.z
         )
 
+        self.renderer._pt_program["u_prev_camera.position"] = (
+            self.prev_camera.position.x,
+            self.prev_camera.position.y,
+            self.prev_camera.position.z
+        )
+        self.renderer._pt_program["u_prev_camera.center"] = (
+            self.prev_camera.center.x,
+            self.prev_camera.center.y,
+            self.prev_camera.center.z
+        )
+        self.renderer._pt_program["u_prev_camera.u"] = (
+            self.prev_camera.u.x,
+            self.prev_camera.u.y,
+            self.prev_camera.u.z
+        )
+        self.renderer._pt_program["u_prev_camera.v"] = (
+            self.prev_camera.v.x,
+            self.prev_camera.v.y,
+            self.prev_camera.v.z
+        )
+
     def run(self) -> None:
         self.is_running = True
 
@@ -130,6 +152,8 @@ class App:
             dt = self.clock.tick(self.target_fps) * 0.001
 
             should_reset_acc = False
+
+            self.prev_camera = self.camera.copy()
 
             events = pygame.event.get()
             for event in events:
@@ -238,7 +262,8 @@ class App:
                     self.camera.pitch += rot.y
 
                 if abs(mouse_rel.x) > 0.0 or abs(mouse_rel.y) > 0.0:
-                    should_reset_acc = True
+                    #should_reset_acc = True
+                    pass
 
             else:
                 # If the cursor mode is active and mouse is pressed,
@@ -278,8 +303,8 @@ class App:
             if keys[pygame.K_q]:
                 self.camera.position += self.camera.up * mov
 
-            if keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d] or keys[pygame.K_e] or keys[pygame.K_q]:
-                should_reset_acc = True
+            if keys[pygame.K_w] or keys[pygame.K_s] or keys[pygame.K_a] or keys[pygame.K_d] or keys[pygame.K_e] or keys[pygame.K_q]:...
+                #should_reset_acc = True
 
             if should_reset_acc:
                 self.renderer.settings.acc_frame = 0
@@ -337,10 +362,13 @@ class App:
                 _, self.renderer.settings.tonemapper = imgui.slider_int(f"Tonemapper", self.renderer.settings.tonemapper, 0, 1, format=tm_name)
 
                 _, self.renderer.settings.exposure  = imgui.slider_float("Exposure", self.renderer.settings.exposure, -5.0, 5.0, format="%.1f")
-
                 _, self.renderer.settings.brightness = imgui.slider_float("Brightness", self.renderer.settings.brightness, -0.5, 0.5, format="%.4f")
                 _, self.renderer.settings.contrast = imgui.slider_float("Contrast", self.renderer.settings.contrast, 0.0, 1.2, format="%.4f")
                 _, self.renderer.settings.saturation = imgui.slider_float("Saturation", self.renderer.settings.saturation, 0.0, 1.75, format="%.4f")
+
+                _, self.renderer.settings.enable_eye_adaptation = imgui.checkbox("Enable eye adaptation", self.renderer.settings.enable_eye_adaptation)
+                imgui.text(f"Adapted exposure: {round(self.renderer.settings.adapted_exposure, 3)}")
+                imgui.text(f"Adaptation speed: {round(self.renderer.settings.adaptation_speed, 3)}")
                 
                 imgui.tree_pop()
 

@@ -95,11 +95,26 @@ class Camera:
         self.distance = 30.0
 
         # Image plane attributes
-        self.u: pygame.Vector2
-        self.v: pygame.Vector2
-        self.center: pygame.Vector2
+        self.u: pygame.Vector3
+        self.v: pygame.Vector3
+        self.center: pygame.Vector3
 
         self.update()
+
+    def copy(self) -> "Camera":
+        cam = Camera((1, 1), self.position.copy(), self.fov, self.mode)
+        cam.aspect_ratio = self.aspect_ratio
+        cam.front = self.front.copy()
+        cam.up = self.up.copy()
+        cam.yaw = self.yaw
+        cam.pitch = self.pitch
+        cam.target = self.target.copy()
+        cam.distance = self.distance
+        cam.u = self.u.copy()
+        cam.v = self.v.copy()
+        cam.center = self.center.copy()
+
+        return cam
 
     def update(self) -> None:
         """ Calculate and update camera vectors. """
