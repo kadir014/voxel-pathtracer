@@ -9,6 +9,7 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Real-time
 - Global illumination via Monte Carlo Path Tracing
 - Voxel world traversal accelerated with DDA
+- Low-Discrepancy Bluenoise sampler
 - Filmic tonemapping
 - Color grading postprocessing
 - Simple PBR-ish material pipeline with texture maps
@@ -26,7 +27,6 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Volumetrics
 - Denoising
 - Temporal reprojection for progressive rendering
-- Low discrepancy noise method 
 - Next event estimation (NEE)
 - Multiple importance sampling (MIS)
 
@@ -44,11 +44,11 @@ $ python main.py
 
 
 # Resources & References
+- E. Heitz et al, [A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space](https://eheitzresearch.wordpress.com/762-2/)
 - M. Pharr, W. Jakob, and G. Humphreys, ["Physically Based Rendering" book](https://www.pbr-book.org/4ed/contents)
 - P. Shirley, T. Black, S. Hollasch, ["Ray Tracing in One Weekend" book series](https://raytracing.github.io/)
 - Alan Wolfe, ["Casual Shadertoy Path Tracing" blog series](https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/)
 - Scratchapixel, [Ray tracing articles](https://www.scratchapixel.com/)
-- Calinou, [Free bluenoise textures repository](https://github.com/Calinou/free-blue-noise-textures)
 
 
 

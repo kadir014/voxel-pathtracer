@@ -8,10 +8,13 @@
 
 """
 
+import platform
+
 import pygame
+import moderngl
 import imgui
 
-from src.common import MAX_BOUNCES, HIDE_HW_INFO
+from src.common import __version__, MAX_BOUNCES, HIDE_HW_INFO
 from src.camera import Camera, CameraMode
 from src.world import VoxelWorld
 from src.renderer import Renderer
@@ -44,7 +47,7 @@ class App:
         self._logical_resolution = logical_resolution
 
         pygame.display.set_mode(self._resolution, pygame.OPENGL | pygame.DOUBLEBUF)
-        pygame.display.set_caption("Voxel Pathtracer Prototype  -  Pygame-CE & ModernGL")
+        pygame.display.set_caption(f"Voxel Pathtracer {__version__}")
         self.clock = pygame.time.Clock()
         self.target_fps = target_fps
 
@@ -61,16 +64,36 @@ class App:
         self.cpu_info = get_cpu_info()
         self.gpu_info = get_gpu_info(self.renderer._context)
 
-        self.is_running = False
+        self.python_version: str
+        self.pygame_version: str
+        self.sdl_version: str
+        self.moderngl_version: str
+        self.opengl_version: str
+        self.imgui_version: str
+        self.fetch_version_info()
 
         self.renderer.update_grid_texture()
 
         self.current_block = 1
 
+        self.is_running = False
+
     @property
     def logical_scale(self) -> float:
         # Assumes aspect ratio is the same.
         return self._logical_resolution[0] / self._resolution[0]
+    
+    def fetch_version_info(self) -> None:
+        """ Gather dependency version information in MAJOR.MINOR.PATCH format. """
+
+        self.python_version = platform.python_version()
+        self.pygame_version = pygame.version.ver
+        self.sdl_version = ".".join((str(v) for v in pygame.get_sdl_version()))
+        self.moderngl_version = moderngl.__version__
+        ogl_major = self.renderer._context.info["GL_MAJOR_VERSION"]
+        ogl_minor = self.renderer._context.info["GL_MINOR_VERSION"]
+        self.opengl_version = f"{ogl_major}.{ogl_minor}"
+        self.imgui_version = imgui.__version__
 
     def _update_camera_uniform(self) -> None:
         self.renderer._pt_program["u_camera.position"] = (
@@ -278,15 +301,24 @@ class App:
             imgui.begin("Settings (press ALT)", True, flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
             imgui.set_window_position(0, 0)
 
-            imgui.text(f"FPS: {round(self.clock.get_fps())}")
-            imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
-            imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
+            if imgui.tree_node("Information", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+                imgui.text(f"FPS: {round(self.clock.get_fps())}")
+                imgui.text(f"Resolution: {self._resolution[0]}x{self._resolution[1]}")
+                imgui.text(f"Renderer: {self._logical_resolution[0]}x{self._logical_resolution[1]} ({round(self.logical_scale, 2)}x)")
+                imgui.text(f"Accumulation: {self.renderer.settings.acc_frame}")
 
-            if not HIDE_HW_INFO:
-                imgui.text(f"CPU: {self.cpu_info['name']}")
-                imgui.text(f"GPU: {self.gpu_info['name']}")
+                if not HIDE_HW_INFO:
+                    imgui.text(f"CPU: {self.cpu_info['name']}")
+                    imgui.text(f"GPU: {self.gpu_info['name']}")
 
-            imgui.text(f"Accumulation: {self.renderer.settings.acc_frame}")
+                imgui.text(f"Python:    {self.python_version}")
+                imgui.text(f"Pygame-CE: {self.pygame_version}")
+                imgui.text(f"SDL:       {self.sdl_version}")
+                imgui.text(f"ModernGL:  {self.moderngl_version}")
+                imgui.text(f"OpenGL:    {self.opengl_version}")
+                imgui.text(f"ImGUI:     {self.imgui_version}")
+
+                imgui.tree_pop()
 
             if imgui.tree_node("Color grading", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
                 _, self.renderer.settings.postprocessing = imgui.checkbox("Enable post-processing", self.renderer.settings.postprocessing)
@@ -331,14 +363,17 @@ class App:
 
                 _, self.renderer.settings.bounces = imgui.slider_int(f"Bounces", self.renderer.settings.bounces, 1, MAX_BOUNCES)
 
-                noise_name = ("None", "Mulberry32 PRNG", "Bluenoise")[self.renderer.settings.noise_method]
+                noise_name = ("None", "Mulberry32 PRNG", "Heitz Bluenoise")[self.renderer.settings.noise_method]
                 _, self.renderer.settings.noise_method = imgui.slider_int(f"Noise method", self.renderer.settings.noise_method, 0, 2, format=noise_name)
 
                 _, self.renderer.settings.russian_roulette = imgui.checkbox("Enable russian-roulette", self.renderer.settings.russian_roulette)
                 _, self.renderer.settings.enable_accumulation = imgui.checkbox("Enable accumulation", self.renderer.settings.enable_accumulation)
 
-                aa_name = ("None", "Jitter Sampling")[self.renderer.settings.antialiasing]
-                _, self.renderer.settings.antialiasing = imgui.slider_int(f"Anti-aliasing", self.renderer.settings.antialiasing, 0, 1, format=aa_name)
+                aa_name = ("None", "Jitter Sampling", "FXAA")[self.renderer.settings.antialiasing]
+                _, self.renderer.settings.antialiasing = imgui.slider_int(f"Anti-aliasing", self.renderer.settings.antialiasing, 0, 2, format=aa_name)
+
+                up_name = ("Nearest", "Bilinear", "Bicubic")[self.renderer.settings.upscaling_method]
+                _, self.renderer.settings.upscaling_method = imgui.slider_int(f"Upscaler", self.renderer.settings.upscaling_method, 0, 2, format=up_name)
 
                 if imgui.tree_node("High-quality render settings"):
                     _, self.renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", self.renderer.settings.highquality_ray_count, 512, 2048)

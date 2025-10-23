@@ -16,6 +16,8 @@
 
 #version 460
 
+//#include src/shaders/common.glsl
+
 in vec2 v_uv;
 out vec4 f_color;
 
@@ -106,21 +108,13 @@ void main() {
         /*
             Saturation
             ----------
-            Human eyes don't see each color equally, we are more sensitive
-            to some than others.
-
-            Instead of using 1/3 for each channel, we use a weight distribution
-            more suitable for our eyes to determine the luminance of a color.
-
-            Weights are taken from https://en.wikipedia.org/wiki/Relative_luminance
+            Boost colors depending on human-eye perceived weights.
 
             - A value of 1.0 is neutral and does nothing.
             - Under 1.0 the image approaches grayscale until 0.0.
             - Over 1.0 the colors start to get stronger.
         */
-        vec3 y = vec3(0.299, 0.587, 0.114);
-        float luminance = dot(color, y);
-        color = mix(vec3(luminance), color, u_saturation);
+        color = mix(luminance(color), color, u_saturation);
 
         // Gamma correction, the color is in LDR sRGB space.
         color = pow(color, vec3(GAMMA));

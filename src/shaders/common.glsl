@@ -22,6 +22,42 @@
 #define HIGHP_FLT_MAX 999999.0
 
 
+#define UPSCALING_METHOD_NEAREST   0
+#define UPSCALING_METHOD_BILINEAR  1
+#define UPSCALING_METHOD_BICUBIC   2
+
+
 #define ANTIALIASING_NONE           0
 #define ANTIALIASING_JITTERSAMPLING 1
 #define ANTIALIASING_FXAA           2
+
+
+#define NOISE_METHOD_NONE            0
+#define NOISE_METHOD_PRNG            1
+#define NOISE_METHOD_HEITZ_BLUENOISE 2
+
+
+/*
+    Human eyes don't see each color equally, we are more sensitive
+    to some than others.
+
+    Instead of using 1/3 for each channel, we use a weight distribution
+    more suitable for our eyes to determine the luminance of a color.
+
+    Weights are taken from https://en.wikipedia.org/wiki/Relative_luminance
+*/
+vec3 luminance(vec3 color) {
+    vec3 y = vec3(0.299, 0.587, 0.114);
+    return vec3(dot(color, y));
+}
+
+
+/*
+    https://en.wikipedia.org/wiki/UV_mapping#Finding_UV_on_a_sphere
+*/
+vec2 uv_project_sphere(vec3 pos) {
+    float u = 0.5 + atan(pos.z, pos.x) / TAU;
+    float v = 0.5 + asin(pos.y) / PI;
+
+    return vec2(u, v);
+}

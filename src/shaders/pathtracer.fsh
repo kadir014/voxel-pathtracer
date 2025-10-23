@@ -20,7 +20,6 @@
 //#include src/shaders/common.glsl
 
 
-#define BLUENOISE_SIZE 1024
 #define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
 #define EMISSIVE_MULT 2.7
 
@@ -41,7 +40,6 @@ uniform uint u_acc_frame;
 uniform bool u_enable_accumulation;
 uniform int u_antialiasing;
 
-uniform sampler2D s_bluenoise;
 uniform sampler3D s_grid;
 uniform sampler2D s_sky;
 uniform sampler2D s_albedo_atlas;
@@ -49,6 +47,12 @@ uniform sampler2D s_emissive_atlas;
 uniform sampler2D s_roughness_atlas;
 uniform sampler2D s_reflectivity_atlas;
 uniform sampler2D s_previous_frame;
+
+layout(std430, binding = 0) readonly buffer HeitzLayout {
+    int heitz_ranking[131072];
+    int heitz_scrambling[131072];
+    int heitz_sobol[65536];
+};
 
 
 struct Camera {
@@ -177,17 +181,6 @@ HitInfo dda(Ray ray) {
 
 
 /*
-    https://en.wikipedia.org/wiki/UV_mapping#Finding_UV_on_a_sphere
-*/
-vec2 uv_project_sphere(vec3 pos) {
-    float u = 0.5 + atan(pos.z, pos.x) / TAU;
-    float v = 0.5 + asin(pos.y) / PI;
-
-    return vec2(u, v);
-}
-
-
-/*
     Wang hash
 
     From https://www.shadertoy.com/view/ttVGDV
@@ -215,21 +208,44 @@ float prng() {
     return float((z ^ (z >> 14))) / 4294967296.0;
 }
 
-/*
-    Bluenoise PRNG.
-    Returns a float in range 0 and 1.
 
-    Works for 1 ray/pixel, but either breaks or doesn't converge above that
-    because doesn't have temporal properties or a major skill issue on my part.
+/*
+    Bluenoise sampler using Owen-scrambled Sobol sequence
+
+    Algorithm is by Eric Heitz et al.
+    https://eheitzresearch.wordpress.com/762-2/
+
+    Parameterization:
+    heitz_seed -> Texture coordinates in screen space
+    heitz_dim -> Sample dimension
+    heitz_sample_i -> Sample index
 */
-vec2 bluenoise_seed;
-int bluenoise_counter;
-float bluenoise() {
-    vec2 pixel = bluenoise_seed * u_resolution;
-    vec4 bluenoise_sample = texture(s_bluenoise, pixel / vec2(BLUENOISE_SIZE, BLUENOISE_SIZE));
-    float r = bluenoise_sample[bluenoise_counter%4];
-    bluenoise_counter++;
-    return r;
+ivec2 heitz_seed;
+int heitz_dim;
+int heitz_sample_i;
+float heitz_sample() {
+    int pixel_i = heitz_seed.x;
+    int pixel_j = heitz_seed.y;
+
+    // Wrap arguments
+    pixel_i = pixel_i & 127;
+    pixel_j = pixel_j & 127;
+    int sample_idx = heitz_sample_i & 255;
+    int sample_dim = heitz_dim & 255; // TODO: Modulo by 8?
+
+    // XOR index based on optimized ranking
+    int ranked_sample_idx = sample_idx ^ heitz_ranking[sample_dim + (pixel_i + pixel_j * 128) * 8];
+
+    // Fetch value in sequence
+    int value = heitz_sobol[sample_dim + ranked_sample_idx * 256];
+
+    // If the dimension is optimized, xor sequence value based on optimized scrambling
+    value = value ^ heitz_scrambling[(sample_dim % 8) + (pixel_i + pixel_j * 128) * 8];
+
+    // Increase dimension after each call
+    heitz_dim++;
+
+    return (0.5 + float(value)) / 256.0;
 }
 
 /*
@@ -238,13 +254,13 @@ float bluenoise() {
 vec3 random_in_unit_sphere() {
     float r0 = 0.0;
     float r1 = 0.0;
-    if (u_noise_method == 1) {
+    if (u_noise_method == NOISE_METHOD_PRNG) {
         r0 = prng();
         r1 = prng();
     }
-    else if (u_noise_method == 2) {
-        r0 = bluenoise();
-        r1 = bluenoise();
+    else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
+        r0 = heitz_sample();
+        r1 = heitz_sample();
     }
 
     float z = r0 * 2.0 - 1.0;
@@ -268,11 +284,11 @@ Ray brdf(
     vec3 new_pos = hitinfo.point + hitinfo.normal * EPSILON;
 
     float specular_chance = 0.0;
-    if (u_noise_method == 1) {
+    if (u_noise_method == NOISE_METHOD_PRNG) {
         specular_chance = prng();
     }
-    else if (u_noise_method == 2) {
-        specular_chance = bluenoise();
+    else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
+        specular_chance = heitz_sample();
     }
 
     // TODO: Metallics...
@@ -366,7 +382,16 @@ vec3 pathtrace(Ray ray) {
         */
         if (u_enable_roulette) {
             float roulette_result = max(radiance_delta.r, max(radiance_delta.g, radiance_delta.b));
-            if (prng() > roulette_result) {
+
+            float roulette_chance = 0.0;
+            if (u_noise_method == NOISE_METHOD_PRNG) {
+                roulette_chance = prng();
+            }
+            else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
+                roulette_chance = heitz_sample();
+            }
+
+            if (roulette_chance > roulette_result) {
                 break;
             }
         
@@ -382,10 +407,7 @@ vec3 pathtrace(Ray ray) {
 void main() {
     vec3 final_radiance = vec3(0.0);
 
-    vec2 pixel = v_uv * u_resolution;
-
-    bluenoise_seed = v_uv;
-    bluenoise_counter = 0;
+    ivec2 pixel = ivec2(v_uv * u_resolution);
 
     float u_ray_countf = float(u_ray_count);
     for (int sample_i = 0; sample_i < u_ray_count; sample_i++) {
@@ -396,6 +418,10 @@ void main() {
             uint(u_acc_frame) * 85889u
         );
 
+        heitz_seed = pixel;
+        heitz_dim = 0; //DIM SET ONCE OUTSIDE SAMPLES?
+        heitz_sample_i = int(u_acc_frame) + sample_i;
+
         vec2 ray_pos = v_uv * 2.0 - 1.0;
 
         if (u_antialiasing == ANTIALIASING_JITTERSAMPLING) {
@@ -405,6 +431,7 @@ void main() {
                 This is most effective if progressive rendering is enabled so
                 the temporal jitter gets accumulated and averaged.
                 But works with single frame renders as well.
+                We can use whitenoise PRNG as this doesn't affect UV.
             */
             float pixel_width = 1.0 / u_resolution.x;
             float jitter_amount = pixel_width * 4.0;
@@ -426,5 +453,5 @@ void main() {
         final_color = mix(previous_color, final_color, weight);
     }
 
-    f_color = vec4(final_color, 1.0);
+    f_color = vec4(final_color, luminance(final_color));
 }

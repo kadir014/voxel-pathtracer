@@ -10,7 +10,6 @@
 
 from typing import TextIO
 
-import os
 from array import array
 from time import perf_counter
 from math import log
@@ -20,6 +19,42 @@ import moderngl
 
 from src.world import BLOCK_IDS, VoxelWorld
 from src.common import MAX_RAYS_PER_PIXEL
+
+
+start = perf_counter()
+print("Loading Heitz Bluenoise data, this may take a little while (I'm going to optimize this I promise 😭)")
+# TODO: OPTIMIZE!
+import src.heitz as heitz
+elapsed = perf_counter() - start
+print(f"Loaded Heitz data in {round(elapsed, 3)}s ({round(elapsed*1000.0,3)}ms)")
+
+# Verify heitz data
+# TODO: Proper logging...
+
+if len(heitz.RANKING_1SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_2SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_4SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_8SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_16SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_32SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_64SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_128SPP) != 128 * 128 * 8 or \
+   len(heitz.RANKING_256SPP) != 128 * 128 * 8:
+    print("[ERROR] Heitz ranking data is not correct size!")
+
+if len(heitz.SCRAMBLING_1SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_2SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_4SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_8SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_16SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_32SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_64SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_128SPP) != 128 * 128 * 8 or \
+   len(heitz.SCRAMBLING_256SPP) != 128 * 128 * 8:
+    print("[ERROR] Heitz scrambling data is not correct size!")
+
+if len(heitz.SOBOL_256SPP_256D) != 256 * 256:
+    print("[ERROR] Heitz sobol data is not correct size!")
 
 
 class RendererSettings:
@@ -100,6 +135,9 @@ class RendererSettings:
 
         self.__renderer._pt_program["u_ray_count"].value = value
 
+        if self.noise_method == 2:
+            self.__renderer.write_heinz_data()
+
     @property
     def bounces(self) -> int:
         return self.__renderer._pt_program["u_bounces"].value
@@ -158,6 +196,14 @@ class RendererSettings:
     @antialiasing.setter
     def antialiasing(self, value: int) -> None:
         self.__renderer._pt_program["u_antialiasing"].value = value
+
+    @property
+    def upscaling_method(self) -> int:
+        return self.__renderer._upscale_program["u_upscaling_method"].value
+    
+    @upscaling_method.setter
+    def upscaling_method(self, value: int) -> None:
+        self.__renderer._upscale_program["u_upscaling_method"].value = value
 
     def increase_ray_counts(self) -> None:
         """ Increase rays/pixel by one step. """
@@ -263,7 +309,7 @@ class Renderer:
         self.patcher.patch_file("post.fsh", "src/shaders/post.fsh")
         self.patcher.patch_file("upscale.fsh", "src/shaders/upscale.fsh")
         self.patcher.patch_file("pathtracer.fsh", "src/shaders/pathtracer.fsh")
-        print(self.patcher.shaders["pathtracer.fsh"])
+        self.patcher.patch_file("fxaa_pass.fsh", "src/shaders/fxaa_pass.fsh")
 
         # All VAOs will use the same buffers since they are all just plain screen quads
         self._vbo = self.create_buffer_object([-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0])
@@ -290,7 +336,6 @@ class Renderer:
             vertex_shader=base_vertex_shader,
             fragment_shader=self.patcher.shaders["pathtracer.fsh"]
         )
-        self._pt_program["s_bluenoise"] = 0
         self._pt_program["s_grid"] = 1
         self._pt_program["s_sky"] = 2
         self._pt_program["s_albedo_atlas"] = 3
@@ -325,6 +370,8 @@ class Renderer:
         )
         self._upscale_program["s_texture"] = 0
         self._upscale_program["s_overlay"] = 1
+        self._upscale_program["u_resolution"] = self._logical_resolution
+        self._upscale_program["u_upscaling_method"] = 2
 
         self._upscale_vao = self._context.vertex_array(
             self._upscale_program,
@@ -335,23 +382,34 @@ class Renderer:
             self._ibo
         )
 
-        bluenoise_surf = pygame.image.load("data/bluenoise_1024x1024.png")
-        self._bluenoise_texture = self._context.texture(
-            bluenoise_surf.get_size(),
-            4,
-            pygame.image.tobytes(bluenoise_surf, "RGBA", True)
+        self._fxaa_program = self._context.program(
+            vertex_shader=base_vertex_shader,
+            fragment_shader=self.patcher.shaders["fxaa_pass.fsh"]
         )
-        self._bluenoise_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        self._bluenoise_texture.repeat_x = True
-        self._bluenoise_texture.repeat_y = True
+        self._fxaa_program["s_texture"] = 0
+        self._fxaa_program["u_resolution"] = self._logical_resolution
+
+        self._fxaa_vao = self._context.vertex_array(
+            self._fxaa_program,
+            (
+                (self._vbo, "2f", "in_position"),
+                (self._uvbo, "2f", "in_uv")
+            ),
+            self._ibo
+        )
 
         # Note: data type being f4 lets us store colors in HDR
-        self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        # Alpha channel in pathtracing textures is for luminance
+        self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture0.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture0,))
-        self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture1.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture1,))
+
+        self._fxaa_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
+        self._fxaa_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._fxaa_fbo = self._context.framebuffer(color_attachments=(self._fxaa_target_texture,))
 
         self._post_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
         self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
@@ -360,6 +418,15 @@ class Renderer:
 
         self.settings = RendererSettings(self)
         self.settings.color_profile_custom()
+
+
+        # We gotta merge all members of the SSBO layout!
+        heinz_total_size = 128 * 128 * 8 * 4 + 128 * 128 * 8 * 4 + 256 * 256 * 4
+        # spp is not changed every frame, we don't need dynamic buffers
+        self.heinz_layout_buf = self._context.buffer(reserve=heinz_total_size, dynamic=False)
+        self.heinz_layout_buf.bind_to_storage_buffer(0)
+
+        self.write_heinz_data()
 
 
         sky_surf = pygame.image.load("data/qwantani_dusk_2_puresky.png")
@@ -464,6 +531,53 @@ class Renderer:
 
         dtype = "f" if isinstance(data[0], float) else "I"
         return self._context.buffer(array(dtype, data))
+    
+    def write_heinz_data(self) -> None:
+        start = perf_counter()
+
+        spp = self.settings.ray_count
+
+        scrambling_map = {
+            1: heitz.SCRAMBLING_1SPP,
+            2: heitz.SCRAMBLING_2SPP,
+            4: heitz.SCRAMBLING_4SPP,
+            8: heitz.SCRAMBLING_8SPP,
+            16: heitz.SCRAMBLING_16SPP,
+            32: heitz.SCRAMBLING_32SPP,
+            64: heitz.SCRAMBLING_64SPP,
+            128: heitz.SCRAMBLING_128SPP,
+            256: heitz.SCRAMBLING_256SPP,
+        }
+
+        ranking_map = {
+            1: heitz.RANKING_1SPP,
+            2: heitz.RANKING_2SPP,
+            4: heitz.RANKING_4SPP,
+            8: heitz.RANKING_8SPP,
+            16: heitz.RANKING_16SPP,
+            32: heitz.RANKING_32SPP,
+            64: heitz.RANKING_64SPP,
+            128: heitz.RANKING_128SPP,
+            256: heitz.RANKING_256SPP,
+        }
+
+        if spp not in scrambling_map:
+            old_spp = spp
+            nearest_power_of_2 = round(log(spp, 2))
+            spp = int(2.0 ** nearest_power_of_2)
+
+            spp = min(spp, 256)
+
+            print(f"[WARNING] Heitz data is not optimized for {old_spp}spp, results may be unexpected or non-optimal. Changed spp = {spp}")
+
+        scrambling = scrambling_map[spp]
+        ranking = ranking_map[spp]
+
+        buf_data = array("I", ranking + scrambling + heitz.SOBOL_256SPP_256D)
+        self.heinz_layout_buf.write(buf_data)
+
+        elapsed = perf_counter() - start
+        print(f"Wrote Heitz data onto GPU in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
     
     def update_ui_surface(self, hotbar: int = 0) -> None:
         self.ui_surface.fill((0, 0, 0, 0))
@@ -733,7 +847,14 @@ class Renderer:
             )
 
     def render(self, ui: bool = True) -> None:
-        """ Render one frame. """
+        """
+        Render one frame.
+        
+        Render passes:
+        Pathtracing -> Post-processing -> FXAA -> Bicubic upscaling -> UI overlay
+        """
+
+        self._context.disable(moderngl.BLEND)
 
         self._pt_program["u_acc_frame"].value = self.settings.acc_frame
 
@@ -756,7 +877,6 @@ class Renderer:
         previous_target = targets[(frame + 1 ) % 2]
 
         current_fbo.use()
-        self._bluenoise_texture.use(0)
         self._voxel_tex.use(1)
         self._sky_texture.use(2)
         self.block_atlas_tex.use(3)
@@ -766,9 +886,19 @@ class Renderer:
         previous_target.use(7)
         self._pt_vao.render()
 
-        self._post_fbo.use()
-        current_target.use(0)
-        self._post_vao.render()
+        if self.settings.antialiasing in (0, 1):
+            self._post_fbo.use()
+            current_target.use(0)
+            self._post_vao.render()
+
+        elif self.settings.antialiasing == 2:
+            self._fxaa_fbo.use()
+            current_target.use(0)
+            self._post_vao.render()
+
+            self._post_fbo.use()
+            self._fxaa_target_texture.use(0)
+            self._fxaa_vao.render()
 
         self._context.screen.use()
         self._post_target_texture.use(0)
@@ -792,6 +922,10 @@ class Renderer:
         self._pt_program["u_ray_count"].value = self.settings.highquality_ray_count
         self.settings.bounces = self.settings.highquality_bounces
         self.settings.enable_accumulation = False
+
+        # Manually invoke this since we don't interact with RendererSettings property
+        if self.settings.noise_method == 2:
+            self.write_heinz_data()
 
         self.render(ui=False)
 
