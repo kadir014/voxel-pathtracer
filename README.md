@@ -10,14 +10,14 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Global illumination via Monte Carlo Path Tracing
 - Voxel world traversal accelerated with DDA
 - Low-Discrepancy Bluenoise sampler
+- Temporal frame accumulation with reprojecting
 - Filmic tonemapping
 - Color grading postprocessing
 - Simple PBR-ish material pipeline with texture maps
   - Albedo, diffuse, emission, specular and roughness.
 - Custome skydome
-- Progressive rendering with frame accumulation
 - Russian Roulette path termination
-- Anti-aliasing with jitter sampling
+- Anti-aliasing with jitter sampling or FXAA
 
 **Roadmap:**
 - Disney BRDF
@@ -26,7 +26,6 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Transparent objects & transmission
 - Volumetrics
 - Denoising
-- Temporal reprojection for progressive rendering
 - Next event estimation (NEE)
 - Multiple importance sampling (MIS)
 
@@ -47,6 +46,7 @@ $ python main.py
 - E. Heitz et al, [A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space](https://eheitzresearch.wordpress.com/762-2/)
 - M. Pharr, W. Jakob, and G. Humphreys, ["Physically Based Rendering" book](https://www.pbr-book.org/4ed/contents)
 - P. Shirley, T. Black, S. Hollasch, ["Ray Tracing in One Weekend" book series](https://raytracing.github.io/)
+- Jacco Bikker, [Reprojection in a Ray Tracer](https://jacco.ompf2.com/2024/01/18/reprojection-in-a-ray-tracer/)
 - Alan Wolfe, ["Casual Shadertoy Path Tracing" blog series](https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/)
 - Scratchapixel, [Ray tracing articles](https://www.scratchapixel.com/)
 

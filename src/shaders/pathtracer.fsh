@@ -356,48 +356,39 @@ Ray brdf(
 /*
     Generate ray from camera position to screen position.
 */
-Ray generate_ray(vec2 pos) {
-    // vec3 screen_world = u_camera.center + u_camera.u * pos.x + u_camera.v * pos.y;
+Ray generate_ray(vec2 uv) {
+    vec3 screen_world = u_camera.center +
+                        u_camera.u * uv.x +
+                        u_camera.v * uv.y;
 
-    // return Ray(
-    //     u_camera.position,
-    //     normalize(screen_world - u_camera.position)
-    // );
-
-    vec3 camera_dir = normalize(u_camera.center - u_camera.position);
-	vec3 view_right = u_camera.u;// normalize(cross(vec3(0.0,1.0,0.0),camera_dir));
-    vec3 view_up = u_camera.v;//(cross(camera_dir,view_right));
-    
-    Ray ray;
-    ray.origin = u_camera.position;
-    ray.dir = normalize(camera_dir * 1.0 + view_right * pos.x + view_up * pos.y);
-    
-    return ray;
+    return Ray(
+        u_camera.position,
+        normalize(screen_world - u_camera.position)
+    );
 }
 
+/*
+    Reproject position in world space back to old camera and get UV.
+*/
 vec3 reproject(vec3 world_pos) {
-    // z < 0 if invalid
-
-    vec3 to_point = world_pos - u_prev_camera.position;
-    vec3 to_point_nrm = normalize(to_point);
+    vec3 delta = world_pos - u_prev_camera.position;
+    vec3 delta_n = normalize(delta);
     
     vec3 camera_dir = normalize(u_prev_camera.center - u_prev_camera.position);
-	vec3 view_right = normalize(u_prev_camera.u);
-    vec3 view_up = normalize(u_prev_camera.v);
+	vec3 right = normalize(u_prev_camera.u);
+    vec3 up = normalize(u_prev_camera.v);
     
-    vec3 fwd = camera_dir;
-    
-    // too close
-    float d = dot(camera_dir,to_point_nrm);
-    if(d < 0.01)
+    // Too close
+    float d = dot(camera_dir, delta_n);
+    if (d < EPSILON) {
         return vec3(0.0, 0.0, -1.0);
-    
+    }
     d = 1.0 / d;
     
-    to_point = to_point_nrm * d - fwd;
+    delta = delta_n * d - camera_dir;
     
-    float x = dot(to_point,view_right) / length(u_prev_camera.u);
-    float y = dot(to_point,view_up) / length(u_prev_camera.v);
+    float x = dot(delta, right) / length(u_prev_camera.u);
+    float y = dot(delta, up) / length(u_prev_camera.v);
     vec2 uv = vec2(x, y);
 
     // [-1, 1] -> [0, 1]
