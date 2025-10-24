@@ -11,13 +11,17 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Voxel world traversal accelerated with DDA
 - Low-Discrepancy Bluenoise sampler
 - Temporal frame accumulation with reprojecting
-- Filmic tonemapping
-- Color grading postprocessing
+- Post-processing
+  - Filmic tonemapping
+  - Color grading
+  - Upscaling
 - Simple PBR-ish material pipeline with texture maps
   - Albedo, diffuse, emission, specular and roughness.
 - Custome skydome
 - Russian Roulette path termination
-- Anti-aliasing with jitter sampling or FXAA
+- Anti-aliasing
+  - Jitter sampling
+  - FXAA
 
 **Roadmap:**
 - Disney BRDF
@@ -25,6 +29,7 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
 - Octree acceleration
 - Transparent objects & transmission
 - Volumetrics
+- Volumetric clouds (realistic & stylistic)
 - Denoising
 - Next event estimation (NEE)
 - Multiple importance sampling (MIS)

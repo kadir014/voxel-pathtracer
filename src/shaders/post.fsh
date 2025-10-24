@@ -15,8 +15,10 @@
 */
 
 #version 460
+#extension GL_ARB_shading_language_include: enable
+#define INCLUDE_OMIT
 
-//#include src/shaders/common.glsl
+#include "common.glsl"
 
 in vec2 v_uv;
 out vec4 f_color;

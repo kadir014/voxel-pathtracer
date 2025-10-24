@@ -8,8 +8,12 @@
 
 */
 
+/* OMIT START */
+precision mediump float;
+/* OMIT END */
 
-//Bicubic sampling from https://www.shadertoy.com/view/msj3zw
+
+// Bicubic sampling from https://www.shadertoy.com/view/msj3zw
 
 vec4 cubic(float v) {
     vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v;

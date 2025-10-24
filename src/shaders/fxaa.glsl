@@ -8,6 +8,10 @@
 
 */
 
+/* OMIT START */
+precision mediump float;
+/* OMIT END */
+
 
 /*
     @brief Fast approximate anti-aliasing (FXAA)
@@ -49,7 +53,7 @@ vec3 fxaa(sampler2D tex, vec2 uv, vec2 resolution) {
     vec2 dir;
     dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
     dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
-    
+
     float lumaSum   = lumaNW + lumaNE + lumaSW + lumaSE;
     float dirReduce = max(lumaSum * (0.25 * FXAA_REDUCE_MUL), FXAA_REDUCE_MIN);
     float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
@@ -67,9 +71,9 @@ vec3 fxaa(sampler2D tex, vec2 uv, vec2 resolution) {
         texture(tex, p + dir * (0.0 / 3.0 - 0.5)).rgb +
         texture(tex, p + dir * (3.0 / 3.0 - 0.5)).rgb
     );
-    
+
     float lumaB = dot(rgbB, luma);
-    
+
     float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
     float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
 

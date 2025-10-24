@@ -15,9 +15,9 @@
 */
 
 #version 460
+#extension GL_ARB_shading_language_include: enable
 
-
-//#include src/shaders/common.glsl
+#include "common.glsl"
 
 
 #define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
@@ -79,12 +79,21 @@ struct Ray {
     vec3 dir; // Normalized direction of ray
 };
 
+// Ray x Voxel hit information
 struct HitInfo {
     bool hit; // Collision with ray happened?
     vec3 point; // Collision point on the surface in world space
     vec3 normal; // Normal of the collision surface
     int block_id; // ID of the block type
     vec2 face_uv; // Local UV coordinate on the hit face
+};
+
+// Empirical PBR-ish surface material
+struct Material {
+    vec3 albedo; // Base color [0, 1] (should have minimal or no shadows)
+    vec3 emissive; // Emissive color [0, infinity]
+    float reflectivity; // Specular reflectivity percentage
+    float roughness; // Perceptual roughness
 };
 
 
@@ -132,7 +141,7 @@ HitInfo dda(Ray ray) {
 
     // Traverse world texture
     for (int i = 0; i < MAX_DDA_STEPS; i++) {
-        // Ray can start out of the map, find a different solution 
+        // Ray can start out of the map, find a different solution
         // if (
         //     voxel.x < 0.0 || voxel.y < 0.0 || voxel.z < 0.0 ||
         //     voxel.x >= 16.0 || voxel.y >= 16.0 || voxel.z >= 16.0
@@ -285,7 +294,7 @@ float heitz_sample() {
 
     // Increase dimension after each call
     heitz_state.dim += 1;
-    
+
     return (0.5 + float(value)) / 256.0;
 }
 
@@ -326,10 +335,17 @@ vec3 random_in_unit_sphere() {
 Ray brdf(
     Ray ray,
     HitInfo hitinfo,
-    inout float specular,
-    float roughness,
-    float reflectivity
+    inout float is_specular,
+    Material material
 ) {
+    // TODO: albedo and emisisve of material is not currently used here
+    //       maybe remove the parameters for memory usage efficency or something
+    //       (does parameters even affect that in glsl? another topic to research...)
+
+    // Perceptual roughness -> linear material roughness
+    // Often called alpha in specular BRDF equations
+    float roughness = material.roughness * material.roughness;
+
     vec3 new_pos = hitinfo.point + hitinfo.normal * EPSILON;
 
     float specular_chance = 0.0;
@@ -342,13 +358,14 @@ Ray brdf(
 
     // TODO: Metallics...
 
-    specular = (specular_chance < reflectivity) ? 1.0 : 0.0;
+    is_specular = (specular_chance < material.reflectivity) ? 1.0 : 0.0;
 
+    // Cosine-weighted hemisphere
     vec3 diffuse_ray_dir = normalize(hitinfo.normal + random_in_unit_sphere());
     vec3 specular_ray_dir = reflect(ray.dir, hitinfo.normal);
-    specular_ray_dir = normalize(mix(specular_ray_dir, diffuse_ray_dir, roughness * roughness));
+    specular_ray_dir = normalize(mix(specular_ray_dir, diffuse_ray_dir, roughness));
 
-    vec3 new_dir = mix(diffuse_ray_dir, specular_ray_dir, specular);
+    vec3 new_dir = mix(diffuse_ray_dir, specular_ray_dir, is_specular);
 
     return Ray(new_pos, new_dir);
 }
@@ -373,20 +390,20 @@ Ray generate_ray(vec2 uv) {
 vec3 reproject(vec3 world_pos) {
     vec3 delta = world_pos - u_prev_camera.position;
     vec3 delta_n = normalize(delta);
-    
+
     vec3 camera_dir = normalize(u_prev_camera.center - u_prev_camera.position);
 	vec3 right = normalize(u_prev_camera.u);
     vec3 up = normalize(u_prev_camera.v);
-    
+
     // Too close
     float d = dot(camera_dir, delta_n);
     if (d < EPSILON) {
         return vec3(0.0, 0.0, -1.0);
     }
     d = 1.0 / d;
-    
+
     delta = delta_n * d - camera_dir;
-    
+
     float x = dot(delta, right) / length(u_prev_camera.u);
     float y = dot(delta, up) / length(u_prev_camera.v);
     vec2 uv = vec2(x, y);
@@ -405,9 +422,13 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
     vec3 radiance_delta = vec3(1.0); // Accumulated multiplier
 
     for (int bounce = 0; bounce < u_bounces; bounce++) {
-        
+
         HitInfo hitinfo = dda(ray);
 
+        /*
+            In temporal reprojection use the first valid ray as the primary ray.
+            TODO: Can this be improved? Maybe average all bounces together?
+        */
         if (bounce == 0) {
             primary_hit = hitinfo;
         }
@@ -429,23 +450,22 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
             radiance += sky_color * radiance_delta;
             break;
         }
-        
 
         /*
-            0 -> top
-            1 -> bottom
-            2 -> side
+            0 -> Top
+            1 -> Bottom
+            2 -> Side
         */
-        float surface = 0.0;
-        if (hitinfo.normal.y > 0.0) surface = 0.0;
-        else if (hitinfo.normal.y < 0.0) surface = 1.0;
-        else surface = 2.0;
+        float surface_id = 0.0;
+        if (hitinfo.normal.y > 0.0) surface_id = 0.0;
+        else if (hitinfo.normal.y < 0.0) surface_id = 1.0;
+        else surface_id = 2.0;
 
         float atlas_w = 1.0 / 3.0;
         float atlas_h = 1.0 / 7.0; // TODO: Pass block row count as uniform (or pass 1/h)
 
         vec2 atlas_uv = hitinfo.face_uv;
-        atlas_uv.x = atlas_uv.x * atlas_w + float(surface) * atlas_w;
+        atlas_uv.x = atlas_uv.x * atlas_w + float(surface_id) * atlas_w;
         atlas_uv.y = atlas_uv.y * atlas_h + float(hitinfo.block_id - 1) * atlas_h;
 
         vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
@@ -453,13 +473,18 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
         float roughness = texture(s_roughness_atlas, atlas_uv).r;
         float reflectivity = texture(s_reflectivity_atlas, atlas_uv).r;
 
-        float specular = 0.0;
-        ray = brdf(ray, hitinfo, specular, roughness, reflectivity);
+        Material material = Material(
+            albedo,
+            emissive,
+            reflectivity,
+            roughness
+        );
 
-        vec3 specular_color = vec3(1.0);
+        float is_specular;
+        ray = brdf(ray, hitinfo, is_specular, material);
 
         radiance += emissive * radiance_delta;
-        radiance_delta *= mix(albedo, specular_color, specular);
+        radiance_delta *= mix(albedo, vec3(1.0), is_specular);
 
         /*
             Russian Roulette:
@@ -480,7 +505,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
             if (roulette_chance > roulette_result) {
                 break;
             }
-        
+
             // Add the energy we 'lose' by randomly terminating paths
             radiance_delta *= 1.0 / roulette_result;
         }
@@ -509,10 +534,11 @@ void main() {
 
         vec2 ray_pos = v_uv * 2.0 - 1.0;
 
-        if (u_antialiasing == ANTIALIASING_JITTERSAMPLING) {
+        // TODO: Currently doesn't work with temporal reprojecting.
+        if (u_antialiasing == ANTIALIASING_JITTERSAMPLING && !u_enable_accumulation) {
             /*
                 Jitter sampling:
-                TODO: DOESN'T WORK WITH TEMPORAL ACCUMULATION
+
                 Do antialiasing by sampling the rays with a small amount of jitter.
                 This is most effective if progressive rendering is enabled so
                 the temporal jitter gets accumulated and averaged.
@@ -537,45 +563,72 @@ void main() {
 
     float curr_depth = length(primary_hit.point - u_camera.position);
 
+    /*
+        Temporal accumulation using reprojection:
+
+        The idea is caching the last frame's render, gathering current frame's
+        geometry and reprojecting back to previous frame. Then we can accumulate
+        frames and do progressive rendering as usual. But now we have the ability
+        to move the camera around while the pixels are still converging.
+
+        However, we also need to limit the amount of accumulation so that very
+        old frames do not have as much impact as the newer ones. This leads to
+        some added noise and sharp reflections being delayed.
+
+        I'm sure there are solutions for these problems but I'm fine with my
+        current implementation.
+    */
+    float max_accumulation_frames = 16.0;
     if (u_enable_accumulation) {
         vec3 prev_uv = reproject(primary_hit.point);
 
-        if (primary_hit.hit && prev_uv.z > 0.0 && (prev_uv.x > 0.0 && prev_uv.x < 1.0 && prev_uv.y > 0.0 && prev_uv.y < 1.0)) {
+        if (primary_hit.hit &&
+            prev_uv.z > 0.0 &&
+            (prev_uv.x > 0.0 && prev_uv.x < 1.0 && prev_uv.y > 0.0 && prev_uv.y < 1.0)
+        ) {
             f_normal = vec4(primary_hit.normal, curr_depth);
 
-            // Normal xyz  depth a
+            /*
+                To match previous and current frame's pixels, I only use depth
+                and normal information.
+
+                TODO: Find better matching algorithms.
+            */
+
+            // rgb -> normal  alpha -> depth
             vec4 _previous_normal_sample = texture(s_previous_normal, prev_uv.xy);
             vec3 previous_normal = normalize(_previous_normal_sample.rgb);
             float previous_depth = _previous_normal_sample.a;
 
+            // Depth is relative to each scene, it's not linear
             float normal_diff = dot(primary_hit.normal, previous_normal);
-            //float depth_diff = abs(curr_depth - previous_depth);
             float rel_depth_diff = abs(curr_depth - previous_depth) / max(curr_depth, previous_depth);
 
-            if (normal_diff > 0.97 && rel_depth_diff < 0.12) {
+            // Very arbitrary values I found by playing around ...
+            float normal_threshold = 0.97;
+            float depth_threshold = 0.12;
+
+            if (normal_diff > normal_threshold && rel_depth_diff < depth_threshold) {
                 vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
-                
+
                 // Temporal blending weight
                 int acc = accumulations[pixel.x + pixel.y * 1920];
-                float capped_frame = min(float(acc), 16.0);
+                float capped_frame = min(float(acc), max_accumulation_frames);
                 float weight = 1.0 / (capped_frame + 1.0);
 
                 // Blend current and reprojected colors
                 final_color = mix(previous_color, final_color, weight);
 
                 accumulations[pixel.x + pixel.y * 1920] += 1;
-
             }
             else {
                 final_color = final_color;
-                //final_color = vec3(0.0, 0.2, 0.0);
                 accumulations[pixel.x + pixel.y * 1920] = 0;
             }
         }
         else {
             // No valid history reset accumulation
             final_color = final_color;
-            //final_color = vec3(0.0, 0.2, 0.0);
             accumulations[pixel.x + pixel.y * 1920] = 0;
         }
     }

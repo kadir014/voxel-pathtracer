@@ -8,6 +8,10 @@
 
 */
 
+/* OMIT START */
+precision mediump float;
+/* OMIT END */
+
 
 #define PI      3.141592653589793238462643383279
 #define TAU     6.283185307179586476925286766559

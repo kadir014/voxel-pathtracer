@@ -265,7 +265,7 @@ class RendererSettings:
 
 class ShaderPatcher:
     def __init__(self) -> None:
-        self.include_pattern = "//#include"
+        self.include_pattern = "#include"
 
         self.shaders: dict[str, str] = {}
 
@@ -278,8 +278,21 @@ class ShaderPatcher:
             if line.startswith(self.include_pattern):
                 path = " ".join(line.split(" ")[1:])
 
+                # Remove quotes
+                if path.startswith("\"") and path.startswith("\""):
+                    path = path[1:-1]
+
+                path = "src/shaders/" + path
+
                 with open(path, "r", encoding="utf-8") as f:
                     include_content = f.read()
+
+                    omit_start = include_content.find("/* OMIT START */")
+                    omit_end = include_content.find("/* OMIT START */")
+                    l = len("/* OMIT START */")
+
+                    if omit_start != -1:
+                        include_content = include_content[:omit_start] + include_content[omit_end+l:]
 
                 new_content += include_content
 

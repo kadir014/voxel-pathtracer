@@ -17,9 +17,10 @@
 */
 
 #version 460
+#extension GL_ARB_shading_language_include: enable
 
-//#include src/shaders/common.glsl
-//#include src/shaders/bicubic.glsl
+#include "common.glsl"
+#include "bicubic.glsl"
 
 in vec2 v_uv;
 out vec4 f_color;
@@ -33,7 +34,6 @@ uniform int u_upscaling_method;
 
 void main() {
     vec3 base = vec3(0.0);
-
     if (u_upscaling_method == UPSCALING_METHOD_NEAREST) {
         base = texelFetch(s_texture, ivec2(v_uv.x * u_resolution.x, v_uv.y * u_resolution.y), 0).rgb;
     }
@@ -45,6 +45,8 @@ void main() {
     }
 
     vec4 overlay = texture(s_overlay, v_uv);
+
+    luminance(vec3(1.0));
     
     // Source-over alpha blending
     vec3 color = mix(base.rgb, overlay.rgb, overlay.a);
