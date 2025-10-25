@@ -12,6 +12,9 @@
 precision mediump float;
 /* OMIT END */
 
+#ifndef COMMON_H
+#define COMMON_H
+
 
 #define PI      3.141592653589793238462643383279
 #define TAU     6.283185307179586476925286766559
@@ -53,9 +56,9 @@ precision mediump float;
 
     Weights are taken from https://en.wikipedia.org/wiki/Relative_luminance
 */
-vec3 luminance(vec3 color) {
+float luminance(vec3 color) {
     vec3 y = vec3(0.2125, 0.7154, 0.0721);
-    return vec3(dot(color, y));
+    return dot(color, y);
 }
 
 
@@ -68,3 +71,6 @@ vec2 uv_project_sphere(vec3 pos) {
 
     return vec2(u, v);
 }
+
+
+#endif // COMMON_H

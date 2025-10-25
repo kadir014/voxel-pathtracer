@@ -15,8 +15,8 @@ A work-in-progress voxel pathtracer prototype in a sandbox environment.
   - Filmic tonemapping
   - Color grading
   - Upscaling
-- Simple PBR-ish material pipeline with texture maps
-  - Albedo, diffuse, emission, specular and roughness.
+- Physically-based material pipeline with texture maps
+  - Albedo, emission, metallic, roughness, reflectance.
 - Custome skydome
 - Russian Roulette path termination
 - Anti-aliasing
@@ -51,9 +51,14 @@ $ python main.py
 - E. Heitz et al, [A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space](https://eheitzresearch.wordpress.com/762-2/)
 - M. Pharr, W. Jakob, and G. Humphreys, ["Physically Based Rendering" book](https://www.pbr-book.org/4ed/contents)
 - P. Shirley, T. Black, S. Hollasch, ["Ray Tracing in One Weekend" book series](https://raytracing.github.io/)
+- Brian Karis, [Real Shading in Unreal Engine 4](https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf)
+- Brent Burley, [Physically Based Shading at Disney](https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf)
+- R. Guy, M. Agopian, [Physically Based Rendering in Filament](https://google.github.io/filament/Filament.md.html)
+- Marco Alamia, [Physically Based Rendering - Cook-Torrance](http://www.codinglabs.net/article_physically_based_rendering_cook_torrance.aspx)
 - Jacco Bikker, [Reprojection in a Ray Tracer](https://jacco.ompf2.com/2024/01/18/reprojection-in-a-ray-tracer/)
 - Alan Wolfe, ["Casual Shadertoy Path Tracing" blog series](https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/)
 - Scratchapixel, [Ray tracing articles](https://www.scratchapixel.com/)
+- Academy Software, [OpenPBR specification](https://academysoftwarefoundation.github.io/OpenPBR/)
 
 
 

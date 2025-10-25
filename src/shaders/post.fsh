@@ -145,7 +145,7 @@ void main() {
             - Under 1.0 the image approaches grayscale until 0.0.
             - Over 1.0 the colors start to get stronger.
         */
-        color = mix(luminance(color), color, u_saturation);
+        color = mix(vec3(luminance(color)), color, u_saturation);
 
         // Gamma correction, the color is in LDR sRGB space.
         color = pow(color, vec3(GAMMA));

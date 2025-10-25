@@ -18,6 +18,7 @@
 #extension GL_ARB_shading_language_include: enable
 
 #include "common.glsl"
+#include "microfacet.glsl"
 
 
 #define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
@@ -44,8 +45,8 @@ uniform sampler3D s_grid;
 uniform sampler2D s_sky;
 uniform sampler2D s_albedo_atlas;
 uniform sampler2D s_emissive_atlas;
+uniform sampler2D s_metallic_atlas;
 uniform sampler2D s_roughness_atlas;
-uniform sampler2D s_reflectivity_atlas;
 uniform sampler2D s_previous_frame;
 uniform sampler2D s_previous_normal;
 
@@ -88,12 +89,13 @@ struct HitInfo {
     vec2 face_uv; // Local UV coordinate on the hit face
 };
 
-// Empirical PBR-ish surface material
+// Physically-based surface material
 struct Material {
-    vec3 albedo; // Base color [0, 1] (should have minimal or no shadows)
-    vec3 emissive; // Emissive color [0, infinity]
-    float reflectivity; // Specular reflectivity percentage
-    float roughness; // Perceptual roughness
+    vec3 albedo; // Base color (should have minimal or no shadows) [0, 1] 
+    vec3 emissive; // Emission color [0, infinity]
+    float metallic; // 0 = Dielectric 1 = Metallic
+    float roughness; // Perceptual roughness [0, 1]
+    float reflectance; // Base reflectance (F0) [0, 1] 
 };
 
 
@@ -330,44 +332,142 @@ vec3 random_in_unit_sphere() {
 }
 
 /*
-    Scatter the ray according to the surface material.
+    My physically-based material BRDF.
+    Heavily inspired by UE4's sampler showcased in Brian Karis' paper.
+
+    Uses a "metalness" workflow.
+    Lambertian BRDF for diffuse and Cook-Torrance microfacet model for specular.
 */
-Ray brdf(
-    Ray ray,
-    HitInfo hitinfo,
-    inout float is_specular,
-    Material material
+vec3 sample_brdf(
+    vec3 N,
+    vec3 V,
+    Material material,
+    out vec3 L,
+    out float pdf
 ) {
-    // TODO: albedo and emisisve of material is not currently used here
-    //       maybe remove the parameters for memory usage efficency or something
-    //       (does parameters even affect that in glsl? another topic to research...)
+    /*
+        1. Choose which reflectance to sample (diffuse or specular)
+        2. Calculate L (reflected ray direction)
+        3. Sample weighted BRDFs
+    */
+
+    vec3 albedo = material.albedo;
+    float metallic = clamp(material.metallic, 0.0, 1.0);
 
     // Perceptual roughness -> linear material roughness
-    // Often called alpha in specular BRDF equations
-    float roughness = material.roughness * material.roughness;
+    // Often called alpha in BRDF equations
+    // Roughness of 0 can mess up with D term
+    float min_roughness = 0.05;
+    float perceived_roughness = clamp(material.roughness, min_roughness, 1.0);
+    float roughness = perceived_roughness * perceived_roughness;
 
-    vec3 new_pos = hitinfo.point + hitinfo.normal * EPSILON;
+    float reflectance = clamp(material.reflectance, DIELECTRIC_BASE_REFLECTANCE, 1.0);
 
-    float specular_chance = 0.0;
+    // Use albedo to tint metals
+    vec3 f0 = mix(vec3(reflectance), albedo, metallic);
+
+    // Diffuse reflectance weight
+    float diffuse_weight = 1.0 - metallic;
+
+    // Specular reflectance weight
+    // Use average Fresnel at normal incidence (perceived weights)
+    float specular_weight = luminance(f0);
+
+    // Adjust weights so they sum up to 1.0
+    float inv_weight = 1.0 / (diffuse_weight + specular_weight);
+    diffuse_weight *= inv_weight;
+    specular_weight *= inv_weight;
+
+    vec3 brdf = vec3(0.0);
+
+    float lobe = 0.0;
     if (u_noise_method == NOISE_METHOD_PRNG) {
-        specular_chance = prng();
+        lobe = prng();
     }
     else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
-        specular_chance = heitz_sample();
+        lobe = heitz_sample();
     }
 
-    // TODO: Metallics...
+    if (prng() < diffuse_weight) {
+        /*
+            Sample diffuse BRDF
 
-    is_specular = (specular_chance < material.reflectivity) ? 1.0 : 0.0;
+            Lambertian model:
+            -----------------
+            f = albedo / pi
+            pdf = NoL / pi
+        */
 
-    // Cosine-weighted hemisphere
-    vec3 diffuse_ray_dir = normalize(hitinfo.normal + random_in_unit_sphere());
-    vec3 specular_ray_dir = reflect(ray.dir, hitinfo.normal);
-    specular_ray_dir = normalize(mix(specular_ray_dir, diffuse_ray_dir, roughness));
+        // Cosine weighted hemisphere
+        L = normalize(N + random_in_unit_sphere());
 
-    vec3 new_dir = mix(diffuse_ray_dir, specular_ray_dir, is_specular);
+        float NoL = dot(N, L);
+        if (NoL <= 0.0) {
+            pdf = 0.0;
+            return vec3(0.0);
+        }
 
-    return Ray(new_pos, new_dir);
+        brdf = albedo / PI;
+        brdf *= NoL;
+
+        pdf = NoL / PI;
+        pdf *= diffuse_weight;
+    }
+    else {
+        /*
+            Sample specular BRDF
+
+            Cook-Torrance microfacet model:
+            -------------------------------
+            D -> Normal distrubiton function term (How microfacets are oriented)
+            F -> Fresnel term
+            G -> Geometry term (How many microfacets are visible)
+
+            f = D * G * F / (4 * NoL * NoV)
+            pdf = D * NoH / (4 * VoH)
+        */
+
+        vec2 xi = vec2(0.0);
+        if (u_noise_method == NOISE_METHOD_PRNG) {
+            xi.x = prng();
+            xi.y = prng();
+        }
+        else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
+            xi.x = heitz_sample();
+            xi.y = heitz_sample();
+        }
+
+        vec3 H = GGX_importance_sample(xi, roughness, N);
+        L = 2.0 * dot(V, H) * H - V;
+
+        float NoL = dot(N, L);
+        float NoV = dot(N, V);
+
+        if (NoL <= 0.0 || NoV <= 0.0) {
+            pdf = 0.0;
+            return vec3(0.0);
+        }
+
+        float NoH = dot(N, H);
+        float VoH = dot(V, H);
+
+        NoL = clamp(NoL, 0.0, 1.0);
+        NoV = clamp(NoV, 0.0, 1.0);
+        NoH = clamp(NoH, 0.0, 1.0);
+        VoH = clamp(VoH, 0.0, 1.0);
+
+        float D = D_GGX(NoH, roughness);
+        float G = G_Smith(NoV, NoL, roughness);
+        vec3 F = F_Schlick(f0, VoH);
+
+        brdf = (D * G * F) / (4.0 * NoL * NoV);
+        brdf *= NoL;
+
+        pdf = D * NoH / (4.0 * VoH);
+        pdf *= specular_weight;
+    }
+
+    return brdf;
 }
 
 /*
@@ -470,23 +570,40 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
 
         vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
         vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * EMISSIVE_MULT;
+        float metallic  = texture(s_metallic_atlas, atlas_uv).r;
         float roughness = texture(s_roughness_atlas, atlas_uv).r;
-        float reflectivity = texture(s_reflectivity_atlas, atlas_uv).r;
 
         Material material = Material(
             albedo,
             emissive,
-            reflectivity,
-            roughness
+            metallic,
+            roughness,
+            DIELECTRIC_BASE_REFLECTANCE
         );
 
-        float is_specular;
-        ray = brdf(ray, hitinfo, is_specular, material);
+        vec3 N = normalize(hitinfo.normal);
+        vec3 V = normalize(-ray.dir);
+        vec3 L;
+        float pdf;
+        vec3 brdf = sample_brdf(N, V, material, L, pdf);
 
-        radiance += emissive * radiance_delta;
-        radiance_delta *= mix(albedo, vec3(1.0), is_specular);
+        ray = Ray(hitinfo.point + N * EPSILON, L);
+
+        // Current surface emission
+        float simple_luma = (material.emissive.r + material.emissive.g + material.emissive.b);
+        if (simple_luma > 0.0) {
+            radiance += material.emissive * radiance_delta;
+            break;
+        }
+
+        // Absorption
+        if (pdf > 0.0) {
+            // BRDF is already multiplied by NoL
+            radiance_delta *= brdf / pdf;
+        }
 
         /*
+            TODO: Adjust to new BRDF.
             Russian Roulette:
             As the throughput gets smaller, the ray is more likely to get terminated early.
             Survivors have their value boosted to make up for fewer samples being in the average.

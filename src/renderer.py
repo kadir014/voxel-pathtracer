@@ -267,13 +267,26 @@ class ShaderPatcher:
     def __init__(self) -> None:
         self.include_pattern = "#include"
 
+        self.headers: dict[str, str] = {}
         self.shaders: dict[str, str] = {}
 
     def patch_stream(self, stream: TextIO) -> str:
         new_content = ""
 
+        omit_start = False
+
         for line in stream.read().split("\n"):
             line = line.strip()
+
+            if line.startswith("/* OMIT END */"):
+                omit_start = False
+                continue
+
+            if line.startswith("/* OMIT START */"):
+                omit_start = True
+
+            if omit_start:
+                continue
 
             if line.startswith(self.include_pattern):
                 path = " ".join(line.split(" ")[1:])
@@ -282,24 +295,27 @@ class ShaderPatcher:
                 if path.startswith("\"") and path.startswith("\""):
                     path = path[1:-1]
 
-                path = "src/shaders/" + path
+                # If header is already patched, get from cache
+                # else, patch it
+                if path in self.headers:
+                    new_content += self.headers[path]
 
-                with open(path, "r", encoding="utf-8") as f:
-                    include_content = f.read()
+                else:
+                    path = "src/shaders/" + path
 
-                    omit_start = include_content.find("/* OMIT START */")
-                    omit_end = include_content.find("/* OMIT START */")
-                    l = len("/* OMIT START */")
+                    with open(path, "r", encoding="utf-8") as f:
+                        include_content = self.patch_stream(f)
 
-                    if omit_start != -1:
-                        include_content = include_content[:omit_start] + include_content[omit_end+l:]
-
-                new_content += include_content
+                    new_content += include_content
 
             else:
                 new_content += line + "\n"
 
         return new_content
+    
+    def patch_header(self, name: str, filepath: str) -> None:
+        with open(filepath, "r", encoding="utf-8") as f:
+            self.headers[name] = self.patch_stream(f)
 
     def patch_file(self, name: str, filepath: str) -> None:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -338,10 +354,14 @@ class Renderer:
         """
 
         self.patcher = ShaderPatcher()
+        self.patcher.patch_header("common.glsl", "src/shaders/common.glsl")
+        self.patcher.patch_header("microfacet.glsl", "src/shaders/microfacet.glsl")
         self.patcher.patch_file("post.fsh", "src/shaders/post.fsh")
         self.patcher.patch_file("upscale.fsh", "src/shaders/upscale.fsh")
         self.patcher.patch_file("pathtracer.fsh", "src/shaders/pathtracer.fsh")
         self.patcher.patch_file("fxaa_pass.fsh", "src/shaders/fxaa_pass.fsh")
+
+        print(self.patcher.shaders["pathtracer.fsh"])
 
         # All VAOs will use the same buffers since they are all just plain screen quads
         self._vbo = self.create_buffer_object([-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0])
@@ -373,7 +393,7 @@ class Renderer:
         self._pt_program["s_albedo_atlas"] = 3
         self._pt_program["s_emissive_atlas"] = 4
         self._pt_program["s_roughness_atlas"] = 5
-        self._pt_program["s_reflectivity_atlas"] = 6
+        self._pt_program["s_metallic_atlas"] = 6
         self._pt_program["s_previous_frame"] = 7
         self._pt_program["s_previous_normal"] = 8
         self._pt_program["u_ray_count"] = 8
@@ -385,7 +405,7 @@ class Renderer:
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = self._world.voxel_size
         self._pt_program["u_enable_accumulation"] = True
-        self._pt_program["u_antialiasing"] = 0
+        self._pt_program["u_antialiasing"] = 2
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -500,8 +520,9 @@ class Renderer:
 
         self.block_texture_size = (16, 16)
 
+        self.scalar_textures = {}
+
         self.block_textures = {
-            None: pygame.Surface(self.block_texture_size),
             "cobblestone": pygame.image.load("data/blocks/cobblestone.png"),
             "dirt": pygame.image.load("data/blocks/dirt.png"),
             "glowstone": pygame.image.load("data/blocks/glowstone.png"),
@@ -510,7 +531,7 @@ class Renderer:
             "grass_side": pygame.image.load("data/blocks/grass_side.png"),
             "iron_block": pygame.image.load("data/blocks/iron_block.png"),
             "iron_block_roughness": pygame.image.load("data/blocks/iron_block_roughness.png"),
-            "iron_block_reflectivity": pygame.image.load("data/blocks/iron_block_reflectivity.png"),
+            "iron_block_metallic": pygame.image.load("data/blocks/iron_block_metallic.png"),
             "lime_wool": pygame.image.load("data/blocks/lime_wool.png"),
             "red_wool": pygame.image.load("data/blocks/red_wool.png")
         }
@@ -529,41 +550,48 @@ class Renderer:
 
         self.emissive_atlas = {
             # top bottom side
-            "cobblestone": (None, None, None),
-            "dirt": (None, None, None),
+            "cobblestone":(0, 0, 0),
+            "dirt": (0, 0, 0),
             "glowstone": ("glowstone_emissive", "glowstone_emissive", "glowstone_emissive"),
-            "grass": (None, None, None),
-            "iron_block": (None, None, None),
-            "lime_wool": (None, None, None),
-            "red_wool": (None, None, None)
+            "grass": (0, 0, 0),
+            "iron_block": (0, 0, 0),
+            "lime_wool": (0, 0, 0),
+            "red_wool": (0, 0, 0)
         }
 
         self.roughness_atlas = {
             # top bottom side
-            "cobblestone": (None, None, None),
-            "dirt": (None, None, None),
-            "glowstone": (None, None, None),
-            "grass": (None, None, None),
+            "cobblestone": (50, 50, 50),
+            "dirt": (50, 50, 50),
+            "glowstone": (50, 50, 50),
+            "grass": (50, 50, 50),
             "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness"),
-            "lime_wool": (None, None, None),
-            "red_wool": (None, None, None)
+            "lime_wool": (50, 50, 50),
+            "red_wool": (50, 50, 50)
         }
 
-        self.reflectivity_atlas = {
+        self.metallic_atlas = {
             # top bottom side
-            "cobblestone": (None, None, None),
-            "dirt": (None, None, None),
-            "glowstone": (None, None, None),
-            "grass": (None, None, None),
-            "iron_block": ("iron_block_reflectivity", "iron_block_reflectivity", "iron_block_reflectivity"),
-            "lime_wool": (None, None, None),
-            "red_wool": (None, None, None)
+            "cobblestone": (0, 0, 0),
+            "dirt": (0, 0, 0),
+            "glowstone": (0, 0, 0),
+            "grass": (0, 0, 0),
+            "iron_block": ("iron_block_metallic", "iron_block_metallic", "iron_block_metallic"),
+            "lime_wool": (0, 0, 0),
+            "red_wool": (0, 0, 0)
         }
+
+        # Cache scalar surfaces
+        for i in range(101):
+            s = pygame.Surface(self.block_texture_size)
+            c = int(i / 100.0 * 255.0)
+            s.fill((c, c, c))
+            self.block_textures[i] = s
 
         self.generate_block_atlas_texture()
         self.generate_emissive_atlas_texture()
         self.generate_roughness_atlas_texture()
-        self.generate_reflectivity_atlas_texture()
+        self.generate_metallic_atlas_texture()
 
 
         self.ui_surface = pygame.Surface(self._resolution, pygame.SRCALPHA)
@@ -858,27 +886,27 @@ class Renderer:
                 )
             )
 
-    def generate_reflectivity_atlas_texture(self) -> None:
+    def generate_metallic_atlas_texture(self) -> None:
         n_blocks = len(self.block_atlas)
 
-        self.reflectivity_atlas_tex = self._context.texture(
+        self.metallic_atlas_tex = self._context.texture(
             (self.block_texture_size[0] * 3, self.block_texture_size[1] * n_blocks),
             3
         )
-        self.reflectivity_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        print(f"Reflectivity atlas size: {self.reflectivity_atlas_tex.width}x{self.reflectivity_atlas_tex.height}")
+        self.metallic_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        print(f"Metallic atlas size: {self.metallic_atlas_tex.width}x{self.metallic_atlas_tex.height}")
 
         for i, block_variant in enumerate(BLOCK_IDS):
             if block_variant is None: continue
 
-            top_surf = self.block_textures[self.reflectivity_atlas[block_variant][0]]
-            bottom_surf = self.block_textures[self.reflectivity_atlas[block_variant][1]]
-            side_surf = self.block_textures[self.reflectivity_atlas[block_variant][2]]
+            top_surf = self.block_textures[self.metallic_atlas[block_variant][0]]
+            bottom_surf = self.block_textures[self.metallic_atlas[block_variant][1]]
+            side_surf = self.block_textures[self.metallic_atlas[block_variant][2]]
             top_data = pygame.image.tobytes(top_surf, "RGB", True)
             bottom_data = pygame.image.tobytes(bottom_surf, "RGB", True)
             side_data = pygame.image.tobytes(side_surf, "RGB", True)
 
-            self.reflectivity_atlas_tex.write(
+            self.metallic_atlas_tex.write(
                 top_data,
                 viewport=(
                     self.block_texture_size[0] * 0,
@@ -887,7 +915,7 @@ class Renderer:
                     self.block_texture_size[1]
                 )
             )
-            self.reflectivity_atlas_tex.write(
+            self.metallic_atlas_tex.write(
                 bottom_data,
                 viewport=(
                     self.block_texture_size[0] * 1,
@@ -896,7 +924,7 @@ class Renderer:
                     self.block_texture_size[1]
                 )
             )
-            self.reflectivity_atlas_tex.write(
+            self.metallic_atlas_tex.write(
                 side_data,
                 viewport=(
                     self.block_texture_size[0] * 2,
@@ -942,7 +970,7 @@ class Renderer:
         self.block_atlas_tex.use(3)
         self.emissive_atlas_tex.use(4)
         self.roughness_atlas_tex.use(5)
-        self.reflectivity_atlas_tex.use(6)
+        self.metallic_atlas_tex.use(6)
         previous_target.use(7)
         previous_normal.use(8)
         self._pt_vao.render()
