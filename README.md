@@ -1,35 +1,42 @@
 # voxel-pathtracer
-A work-in-progress voxel pathtracer prototype in a sandbox environment.
+A work-in-progress real-time voxel path tracer implementing physically-based rendering.
 
 <img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/cornell.jpg" width=400>
 
 
 
 # Features
-- Real-time
-- Global illumination via Monte Carlo Path Tracing
-- Voxel world traversal accelerated with DDA
-- Low-Discrepancy Bluenoise sampler
-- Temporal frame accumulation with reprojecting
-- Post-processing
+- **Real-Time Voxel Path Tracing**
+  - Monte Carlo global illumination with multiple bounces
+  - Accelerated voxel traversal via DDA algorithm
+  - Russian Roulette termination for unbiased energy conservation
+
+- **Sampling & Image Stability**
+  - Low-discrepancy blue noise sampling
+  - Temporal accumulation with reprojection for noise reduction
+  - Multiple anti-aliasing methods like FXAA and subpixel jitter
+
+- **Physically-Based Materials**
+  - Unified PBR pipeline inspired by UE4's model
+  - Real-time & artistic efficiency
+  - Texture maps for each property such as albedo, metallic, roughness, ...
+
+- **Post-Processing Pipeline**
   - Filmic tonemapping
   - Color grading
-  - Upscaling
-- Physically-based material pipeline with texture maps
-  - Albedo, emission, metallic, roughness, reflectance.
-- Custome skydome
-- Russian Roulette path termination
-- Anti-aliasing
-  - Jitter sampling
-  - FXAA
+  - Upsampling
 
-**Roadmap:**
-- Disney BRDF
-- Procuderal sky / atmosphere model
-- Octree acceleration
-- Transparent objects & transmission
+- **Environment**
+  - Skydome texture as evironment map
+  - Emissive materials as light sources
+
+### Roadmap
+- Procuderal sky generation
+  - Somewhat physically correct atmosphere model
+  - Volumetric clouds (realistic & stylistic)
+- Octree acceleration for world traversal
+- Transparent objects & transmission (Disney BSDF?)
 - Volumetrics
-- Volumetric clouds (realistic & stylistic)
 - Denoising
 - Next event estimation (NEE)
 - Multiple importance sampling (MIS)
