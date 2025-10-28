@@ -272,16 +272,13 @@ class Sandbox(Scene):
 
             _, renderer.settings.russian_roulette = imgui.checkbox("Russian-roulette", renderer.settings.russian_roulette)
             _, renderer.settings.enable_accumulation = imgui.checkbox("Temporal accumulation", renderer.settings.enable_accumulation)
+            _, renderer.settings.nee = imgui.checkbox("Next Event Estimation", renderer.settings.nee)
 
             aa_name = ("None", "Jitter Sampling", "FXAA")[renderer.settings.antialiasing]
             _, renderer.settings.antialiasing = imgui.slider_int(f"Anti-aliasing", renderer.settings.antialiasing, 0, 2, format=aa_name)
 
             up_name = ("Nearest", "Bilinear", "Bicubic")[renderer.settings.upscaling_method]
             _, renderer.settings.upscaling_method = imgui.slider_int(f"Upscaler", renderer.settings.upscaling_method, 0, 2, format=up_name)
-
-            _, renderer._denoise_program["u_hw"] = imgui.slider_int(f"u_hw", renderer._denoise_program["u_hw"].value, 1, 14)
-            _, renderer._denoise_program["u_sigmaspace"] = imgui.slider_float(f"u_sigmaspace", renderer._denoise_program["u_sigmaspace"].value, 0.1, 50.0)
-            _, renderer._denoise_program["u_sigmacolor"] = imgui.slider_float(f"u_sigmacolor", renderer._denoise_program["u_sigmacolor"].value, 0.1, 50.0)
 
             if imgui.tree_node("High-quality render settings"):
                 _, renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", renderer.settings.highquality_ray_count, 512, 2048)
@@ -297,6 +294,10 @@ class Sandbox(Scene):
             )
             if clicked:
                 renderer.settings.denoiser_id = selected_denoiser
+
+            _, renderer._denoise_program["u_hw"] = imgui.slider_int(f"u_hw", renderer._denoise_program["u_hw"].value, 1, 14)
+            _, renderer._denoise_program["u_sigmaspace"] = imgui.slider_float(f"u_sigmaspace", renderer._denoise_program["u_sigmaspace"].value, 0.1, 50.0)
+            _, renderer._denoise_program["u_sigmacolor"] = imgui.slider_float(f"u_sigmacolor", renderer._denoise_program["u_sigmacolor"].value, 0.1, 50.0)
 
             imgui.tree_pop()
 

@@ -196,6 +196,14 @@ class RendererSettings:
         self.__renderer._pt_program["u_enable_roulette"].value = value
 
     @property
+    def nee(self) -> bool:
+        return self.__renderer._pt_program["u_enable_nee"].value
+    
+    @nee.setter
+    def nee(self, value: bool) -> None:
+        self.__renderer._pt_program["u_enable_nee"].value = value
+
+    @property
     def enable_sky_texture(self) -> bool:
         return self.__renderer._pt_program["u_enable_sky_texture"].value
     
@@ -430,6 +438,7 @@ class Renderer:
         self._pt_program["u_noise_method"] = 2
         self._pt_program["u_enable_roulette"] = False
         self._pt_program["u_enable_sky_texture"] = True
+        self._pt_program["u_enable_nee"] = True
         self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = shared.world.voxel_size
@@ -508,13 +517,13 @@ class Renderer:
         # Alpha channel in pathtracing textures is for luminance
         self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture0.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        #self._pathtracer_target_texture0.repeat_x = False
-        #self._pathtracer_target_texture0.repeat_y = False
+        self._pathtracer_target_texture0.repeat_x = False
+        self._pathtracer_target_texture0.repeat_y = False
         self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture0,self._pathtracer_target_normal0))
         self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture1.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        #self._pathtracer_target_texture1.repeat_x = False
-        #self._pathtracer_target_texture1.repeat_y = False
+        self._pathtracer_target_texture1.repeat_x = False
+        self._pathtracer_target_texture1.repeat_y = False
         self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture1,self._pathtracer_target_normal1))
 
 
@@ -523,11 +532,13 @@ class Renderer:
         self._fxaa_fbo = self._context.framebuffer(color_attachments=(self._fxaa_target_texture,))
 
         self._post_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
-        self._post_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._post_fbo = self._context.framebuffer(color_attachments=(self._post_target_texture,))
 
-        self._denoise_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
-        self._denoise_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._denoise_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        self._denoise_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._denoise_target_texture.repeat_x = False
+        self._denoise_target_texture.repeat_y = False
         self._denoise_fbo = self._context.framebuffer(color_attachments=(self._denoise_target_texture,))
 
 
@@ -1003,15 +1014,15 @@ class Renderer:
         --------------
 
           Pathtracing
-              ↓           (HDR, logical resolution)
-        Post-processing
-              ↓           (LDR, logical resolution)
-             FXAA
-              ↓
+              ↓           (HDR, logical resolution, NEAREST)
           Denoising
+              ↓
+        Post-processing
+              ↓           (LDR, logical resolution, LINEAR)
+             FXAA
               ↓ 
           Upscaling
-              ↓           (LDR, display resolution)
+              ↓           (LDR, display resolution, LINEAR)
           UI overlay
               ↓
            Display
@@ -1056,26 +1067,26 @@ class Renderer:
         else:
             current_target.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
+        self._denoise_fbo.use()
+        current_target.use(0)
+        self._denoise_vao.render()
+
         if self.settings.antialiasing in (0, 1):
             self._post_fbo.use()
-            current_target.use(0)
+            self._denoise_target_texture.use(0)
             self._post_vao.render()
 
         elif self.settings.antialiasing == 2:
             self._fxaa_fbo.use()
-            current_target.use(0)
+            self._denoise_target_texture.use(0)
             self._post_vao.render()
 
             self._post_fbo.use()
             self._fxaa_target_texture.use(0)
             self._fxaa_vao.render()
 
-        self._denoise_fbo.use()
-        self._post_target_texture.use(0)
-        self._denoise_vao.render()
-
         self._context.screen.use()
-        self._denoise_target_texture.use(0)
+        self._post_target_texture.use(0)
         if ui:
             self.ui_texture.use(1)
         else:
