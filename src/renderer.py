@@ -18,7 +18,8 @@ from math import log
 import pygame
 import moderngl
 
-from src.world import BLOCK_IDS, VoxelWorld
+from src import shared
+from src.world import BLOCK_IDS
 from src.common import MAX_RAYS_PER_PIXEL
 
 
@@ -63,10 +64,15 @@ class RendererSettings:
         self.__renderer = renderer
 
         self.highquality_ray_count = 512
-        self.highquality_bounces = 12
+        self.highquality_bounces = 15
 
         # Only use power of 2s for samples (ray count per pixel)
         self.only_power_of_2s = True
+        
+        self.denoisers = [
+            "None",
+            "Bilateral",
+        ]
 
     @property
     def postprocessing(self) -> bool:
@@ -75,6 +81,14 @@ class RendererSettings:
     @postprocessing.setter
     def postprocessing(self, value: bool) -> None:
         self.__renderer._post_program["u_enable_post"].value = value
+
+    @property
+    def chromatic_aberration(self) -> float:
+        return self.__renderer._post_program["u_chromatic_aberration"].value
+    
+    @chromatic_aberration.setter
+    def chromatic_aberration(self, value: float) -> None:
+        self.__renderer._post_program["u_chromatic_aberration"].value = value
 
     @property
     def tonemapper(self) -> int:
@@ -217,6 +231,14 @@ class RendererSettings:
         self.__renderer._pt_program["u_antialiasing"].value = value
 
     @property
+    def denoiser_id(self) -> int:
+        return self.__renderer._denoise_program["u_denoiser"].value
+    
+    @denoiser_id.setter
+    def denoiser_id(self, value: int) -> None:
+        self.__renderer._denoise_program["u_denoiser"].value = value
+
+    @property
     def upscaling_method(self) -> int:
         return self.__renderer._upscale_program["u_upscaling_method"].value
     
@@ -250,9 +272,9 @@ class RendererSettings:
         """ Set to custom color profile which I thought looked good with ACES. """
 
         self.exposure = -1.993
-        self.brightness = 0.00435
-        self.contrast = 1.0212
-        self.saturation = 1.235
+        self.brightness = 0.000235
+        self.contrast = 1.030
+        self.saturation = 1.32
 
     def color_profile_zero(self) -> None:
         """ Set color grading to defaults. """
@@ -261,6 +283,12 @@ class RendererSettings:
         self.brightness = 0.0
         self.contrast = 1.0
         self.saturation = 1.0
+
+    def color_profile_noir(self) -> None:
+        self.exposure = -3.1
+        self.brightness = 0.0005
+        self.contrast = 1.043
+        self.saturation = 0.0
 
 
 class ShaderPatcher:
@@ -329,15 +357,14 @@ class Renderer:
 
     def __init__(self,
             resolution: tuple[int, int],
-            logical_resolution: tuple[int, int],
-            world: VoxelWorld
+            logical_resolution: tuple[int, int]
             ) -> None:
-        self._world = world
         self._resolution = resolution
         self._logical_resolution = logical_resolution
 
         self._context = moderngl.create_context()
 
+        # Everything is rendered on a screenquad
         base_vertex_shader = """
         #version 330
 
@@ -356,12 +383,13 @@ class Renderer:
         self.patcher = ShaderPatcher()
         self.patcher.patch_header("common.glsl", "src/shaders/common.glsl")
         self.patcher.patch_header("microfacet.glsl", "src/shaders/microfacet.glsl")
+        self.patcher.patch_header("bicubic.glsl", "src/shaders/bicubic.glsl")
+        self.patcher.patch_header("fxaa.glsl", "src/shaders/fxaa.glsl")
         self.patcher.patch_file("post.fsh", "src/shaders/post.fsh")
         self.patcher.patch_file("upscale.fsh", "src/shaders/upscale.fsh")
         self.patcher.patch_file("pathtracer.fsh", "src/shaders/pathtracer.fsh")
         self.patcher.patch_file("fxaa_pass.fsh", "src/shaders/fxaa_pass.fsh")
-
-        print(self.patcher.shaders["pathtracer.fsh"])
+        self.patcher.patch_file("denoise.fsh", "src/shaders/denoise.fsh")
 
         # All VAOs will use the same buffers since they are all just plain screen quads
         self._vbo = self.create_buffer_object([-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0])
@@ -374,6 +402,7 @@ class Renderer:
         )
         self._post_program["u_enable_post"] = True
         self._post_program["u_tonemapper"] = 1
+        self._post_program["u_chromatic_aberration"] = 0.0035
 
         self._post_vao = self._context.vertex_array(
             self._post_program,
@@ -403,9 +432,10 @@ class Renderer:
         self._pt_program["u_enable_sky_texture"] = True
         self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
         self._pt_program["u_resolution"] = self._logical_resolution
-        self._pt_program["u_voxel_size"] = self._world.voxel_size
+        self._pt_program["u_voxel_size"] = shared.world.voxel_size
         self._pt_program["u_enable_accumulation"] = True
         self._pt_program["u_antialiasing"] = 2
+        self._pt_program["u_exp_raymarch"] = 0
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -450,6 +480,26 @@ class Renderer:
             self._ibo
         )
 
+        self._denoise_program = self._context.program(
+            vertex_shader=base_vertex_shader,
+            fragment_shader=self.patcher.shaders["denoise.fsh"]
+        )
+        self._denoise_program["s_texture"] = 0
+        self._denoise_program["u_resolution"] = self._logical_resolution
+        self._denoise_program["u_denoiser"] = 0
+        self._denoise_program["u_hw"] = 4
+        self._denoise_program["u_sigmaspace"] = 10.0
+        self._denoise_program["u_sigmacolor"] = 25.0
+
+        self._denoise_vao = self._context.vertex_array(
+            self._denoise_program,
+            (
+                (self._vbo, "2f", "in_position"),
+                (self._uvbo, "2f", "in_uv")
+            ),
+            self._ibo
+        )
+
         self._pathtracer_target_normal0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_normal0.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_normal1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
@@ -473,8 +523,12 @@ class Renderer:
         self._fxaa_fbo = self._context.framebuffer(color_attachments=(self._fxaa_target_texture,))
 
         self._post_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
-        self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._post_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self._post_fbo = self._context.framebuffer(color_attachments=(self._post_target_texture,))
+
+        self._denoise_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
+        self._denoise_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._denoise_fbo = self._context.framebuffer(color_attachments=(self._denoise_target_texture,))
 
 
         # The post-processing shader will rewrite the adapted exposure each frame
@@ -485,7 +539,7 @@ class Renderer:
         self._exposure_layout_buf.bind_to_storage_buffer(1)
 
 
-        acc_total_size = 1920 * 1080 * 4
+        acc_total_size = self._logical_resolution[0] * self._logical_resolution[1] * 4
         self._acc_layout_buf = self._context.buffer(reserve=acc_total_size, dynamic=True)
         self._acc_layout_buf.bind_to_storage_buffer(2)
         self.clear_accumulation()
@@ -504,7 +558,7 @@ class Renderer:
         self.write_heinz_data()
 
 
-        sky_surf = pygame.image.load("data/qwantani_dusk_2_puresky.png")
+        sky_surf = pygame.image.load("data/sky/qwantani_noon_puresky.png")
         self._sky_texture = self._context.texture(
             sky_surf.get_size(),
             3,
@@ -514,7 +568,7 @@ class Renderer:
         self._sky_texture.repeat_x = True
         self._sky_texture.repeat_y = True
 
-        self._voxel_tex = self._context.texture3d(self._world.dimensions, 1)
+        self._voxel_tex = self._context.texture3d(shared.world.dimensions, 1)
         self._voxel_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
 
@@ -531,9 +585,9 @@ class Renderer:
             "grass_side": pygame.image.load("data/blocks/grass_side.png"),
             "iron_block": pygame.image.load("data/blocks/iron_block.png"),
             "iron_block_roughness": pygame.image.load("data/blocks/iron_block_roughness.png"),
-            "iron_block_metallic": pygame.image.load("data/blocks/iron_block_metallic.png"),
             "lime_wool": pygame.image.load("data/blocks/lime_wool.png"),
-            "red_wool": pygame.image.load("data/blocks/red_wool.png")
+            "red_wool": pygame.image.load("data/blocks/red_wool.png"),
+            "red_light_emissive": pygame.image.load("data/blocks/red_light_emissive.png"),
         }
 
         # albedo atlas
@@ -545,7 +599,8 @@ class Renderer:
             "grass": ("grass_top", "dirt", "grass_side"),
             "iron_block": ("iron_block", "iron_block", "iron_block"),
             "lime_wool": ("lime_wool", "lime_wool", "lime_wool"),
-            "red_wool": ("red_wool", "red_wool", "red_wool")
+            "red_wool": ("red_wool", "red_wool", "red_wool"),
+            "red_light": (0, 0, 0)
         }
 
         self.emissive_atlas = {
@@ -556,7 +611,8 @@ class Renderer:
             "grass": (0, 0, 0),
             "iron_block": (0, 0, 0),
             "lime_wool": (0, 0, 0),
-            "red_wool": (0, 0, 0)
+            "red_wool": (0, 0, 0),
+            "red_light": ("red_light_emissive", "red_light_emissive", "red_light_emissive"),
         }
 
         self.roughness_atlas = {
@@ -567,7 +623,8 @@ class Renderer:
             "grass": (50, 50, 50),
             "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness"),
             "lime_wool": (50, 50, 50),
-            "red_wool": (50, 50, 50)
+            "red_wool": (50, 50, 50),
+            "red_light": (50, 50, 50),
         }
 
         self.metallic_atlas = {
@@ -576,9 +633,10 @@ class Renderer:
             "dirt": (0, 0, 0),
             "glowstone": (0, 0, 0),
             "grass": (0, 0, 0),
-            "iron_block": ("iron_block_metallic", "iron_block_metallic", "iron_block_metallic"),
+            "iron_block": (100, 100, 100),
             "lime_wool": (0, 0, 0),
-            "red_wool": (0, 0, 0)
+            "red_wool": (0, 0, 0),
+            "red_light": (0, 0, 0),
         }
 
         # Cache scalar surfaces
@@ -690,6 +748,9 @@ class Renderer:
             if block == "grass":
                 block = "grass_side"
 
+            if block == "red_light":
+                block = "red_light_emissive"
+
             block_surf = pygame.transform.scale_by(self.block_textures[block], 1.4)
 
             x = self._resolution[0] * 0.5 - self.hotbar_surf.width * 0.495 - hotbar_single_size * 0.5
@@ -711,19 +772,19 @@ class Renderer:
         start = perf_counter()
 
         layers = []
-        for layer_i in range(self._world.dimensions[1]):
-            surf = pygame.Surface((self._world.dimensions[0], self._world.dimensions[2]))
+        for layer_i in range(shared.world.dimensions[1]):
+            surf = pygame.Surface((shared.world.dimensions[0], shared.world.dimensions[2]))
             layers.append(surf)
 
             # z -> layer_i
             # x -> x
             # y = height - y
 
-            for y in range(self._world.dimensions[1]):
-                for x in range(self._world.dimensions[0]):
-                    voxel = self._world[x, y, layer_i]
+            for y in range(shared.world.dimensions[1]):
+                for x in range(shared.world.dimensions[0]):
+                    voxel = shared.world[x, y, layer_i]
 
-                    surf.set_at((x, (self._world.dimensions[1] - 1) - y), (voxel, voxel, voxel))
+                    surf.set_at((x, (shared.world.dimensions[1] - 1) - y), (voxel, voxel, voxel))
 
         data = bytearray()
         for layer in layers:
@@ -939,7 +1000,21 @@ class Renderer:
         Render one frame.
         
         Render passes:
-        Pathtracing -> Post-processing -> FXAA -> Bicubic upscaling -> UI overlay
+        --------------
+
+          Pathtracing
+              ↓           (HDR, logical resolution)
+        Post-processing
+              ↓           (LDR, logical resolution)
+             FXAA
+              ↓
+          Denoising
+              ↓ 
+          Upscaling
+              ↓           (LDR, display resolution)
+          UI overlay
+              ↓
+           Display
         """
 
         self._context.disable(moderngl.BLEND)
@@ -995,8 +1070,12 @@ class Renderer:
             self._fxaa_target_texture.use(0)
             self._fxaa_vao.render()
 
-        self._context.screen.use()
+        self._denoise_fbo.use()
         self._post_target_texture.use(0)
+        self._denoise_vao.render()
+
+        self._context.screen.use()
+        self._denoise_target_texture.use(0)
         if ui:
             self.ui_texture.use(1)
         else:

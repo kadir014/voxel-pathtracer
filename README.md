@@ -24,6 +24,7 @@ A work-in-progress real-time voxel path tracer implementing physically-based ren
 - **Post-Processing Pipeline**
   - Filmic tonemapping
   - Color grading
+  - Chromatic aberration
   - Upsampling
 
 - **Environment**

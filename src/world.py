@@ -24,7 +24,8 @@ BLOCK_IDS = (
     "grass",
     "iron_block",
     "lime_wool",
-    "red_wool"
+    "red_wool",
+    "red_light"
 )
 
 
@@ -59,10 +60,7 @@ class VoxelWorld:
         self.voxel_size = voxel_size
 
         self.__map = {}
-        for y in range(self.dimensions[1]):
-            for z in range(self.dimensions[2]):
-                for x in range(self.dimensions[0]):
-                    self.__map[(x, y, z)] = 0
+        self.clear()
 
         # Grass floor
         for z in range(self.dimensions[2]):
@@ -95,6 +93,12 @@ class VoxelWorld:
 
         elapsed = perf_counter() - start
         print(f"Loaded map in {round(elapsed, 3)}s ({round(elapsed*1000.0, 3)}ms)")
+
+    def clear(self) -> None:
+        for y in range(self.dimensions[1]):
+            for z in range(self.dimensions[2]):
+                for x in range(self.dimensions[0]):
+                    self.__map[(x, y, z)] = 0
 
     def dda(self,
             origin: pygame.Vector3,

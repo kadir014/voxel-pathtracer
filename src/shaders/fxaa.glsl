@@ -12,6 +12,9 @@
 precision mediump float;
 /* OMIT END */
 
+#ifndef FXAA_H
+#define FXAA_H
+
 
 /*
     @brief Fast approximate anti-aliasing (FXAA)
@@ -79,3 +82,6 @@ vec3 fxaa(sampler2D tex, vec2 uv, vec2 resolution) {
 
     return ((lumaB < lumaMin) || (lumaB > lumaMax)) ? rgbA : rgbB;
 }
+
+
+#endif // FXAA_H

@@ -10,6 +10,8 @@
 
 from src.app import App
 from src.common import *
+from src.scenes.sandbox import Sandbox
+from src.scenes.material_preview import MaterialPreview
 
 
 if __name__ == "__main__":
@@ -23,5 +25,8 @@ if __name__ == "__main__":
         ),
         target_fps=TARGET_FPS
     )
+
+    app.add_scene(Sandbox)
+    #app.add_scene(MaterialPreview)
 
     app.run()

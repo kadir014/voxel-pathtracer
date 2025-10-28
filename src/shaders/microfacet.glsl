@@ -65,20 +65,23 @@ float G_Smith(float NdotV, float NdotL, float roughness) {
 // https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf
 vec3 GGX_importance_sample(vec2 xi, float roughness, vec3 N) {
     float alpha = roughness * roughness;
-    float Phi = TAU * xi.x;
-    float CosTheta = sqrt( (1.0 - xi.y) / ( 1.0 + (alpha*alpha - 1.0) * xi.y ) );
-    float SinTheta = sqrt( 1.0 - CosTheta * CosTheta );
+    float phi = TAU * xi.x;
+    float cos_theta = sqrt((1.0 - xi.y) / (1.0 + (alpha * alpha - 1.0) * xi.y));
+    float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 
+    // Spherical coordinates
     vec3 H;
-    H.x = SinTheta * cos( Phi );
-    H.y = SinTheta * sin( Phi );
-    H.z = CosTheta;
+    H.x = sin_theta * cos(phi);
+    H.y = sin_theta * sin(phi);
+    H.z = cos_theta;
 
-    vec3 UpVector = abs(N.z) < 0.9999 ? vec3(0.0,0.0,1.0) : vec3(1.0,0.0,0.0);
-    vec3 TangentX = normalize( cross( UpVector, N ) );
-    vec3 TangentY = cross( N, TangentX );
+    vec3 up = abs(N.z) < 0.9999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent_x = normalize(cross(up, N));
+    vec3 tangent_y = cross(N, tangent_x);
 
-    return TangentX * H.x + TangentY * H.y + N * H.z;
+    // Tangent to world space
+    return tangent_x * H.x + tangent_y * H.y + N * H.z;
 }
+
 
 #endif // MICROFACET_H

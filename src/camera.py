@@ -102,14 +102,22 @@ class Camera:
         self.update()
 
     def copy(self) -> "Camera":
-        cam = Camera((1, 1), self.position.copy(), self.fov, self.mode)
+        cam = Camera((1, 1), (0, 0, 0))
+        
+        cam.mode = self.mode
         cam.aspect_ratio = self.aspect_ratio
+        cam.fov = self.fov
+        
+        cam.position = self.position.copy()
         cam.front = self.front.copy()
         cam.up = self.up.copy()
+
         cam.yaw = self.yaw
         cam.pitch = self.pitch
+
         cam.target = self.target.copy()
         cam.distance = self.distance
+
         cam.u = self.u.copy()
         cam.v = self.v.copy()
         cam.center = self.center.copy()

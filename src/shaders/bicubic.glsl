@@ -12,6 +12,9 @@
 precision mediump float;
 /* OMIT END */
 
+#ifndef BICUBIC_H
+#define BICUBIC_H
+
 
 // Bicubic sampling from https://www.shadertoy.com/view/msj3zw
 
@@ -65,3 +68,6 @@ vec4 textureBicubic(sampler2D tex, vec2 uv) {
        sy
     );
 }
+
+
+#endif // BICUBIC_H

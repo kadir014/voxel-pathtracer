@@ -16,15 +16,16 @@
 
 #version 460
 #extension GL_ARB_shading_language_include: enable
-#define INCLUDE_OMIT
 
 #include "common.glsl"
+
 
 in vec2 v_uv;
 out vec4 f_color;
 
 uniform sampler2D s_texture;
 uniform bool u_enable_post;
+uniform float u_chromatic_aberration;
 uniform float u_exposure;
 uniform uint u_tonemapper;
 uniform float u_brightness;
@@ -37,6 +38,7 @@ layout(std430, binding = 1) buffer ExposureLayout {
     float u_adapted_exposure;
 };
 
+uniform float ChromaticAberration;
 
 /*
     ACES filmic tone mapping curve
@@ -60,11 +62,36 @@ void main() {
             HDR -> LDR sRGB color space pipeline:
 
             1. The image is in HDR linear space [0, infinity)
-            2. Exposure adjustment
-            3. Tonemapping
-            4. Color grading (contrast, saturation, ...)
-            5. Gamma correction and convert to sRGB. [0, 1]
+            2. Lens aberration
+            3. Exposure adjustment
+            4. Tonemapping
+            5. Color grading (contrast, saturation, ...)
+            6. Gamma correction and convert to sRGB. [0, 1]
         */
+
+        /*
+            Radial Chromatic Aberration
+            ---------------------------
+            Imitates lens aberration.
+
+            Since chromatic aberration happens on the lens by affecting the
+            individual wavelengths, I think it's most sensible to do this
+            in HDR space before any color grading and tonemapping.
+        */
+        float ca_intensity = u_chromatic_aberration;
+        
+        vec2 delta = v_uv - vec2(0.5);
+        float d = length(delta);
+        vec2 dir = delta / d;
+        
+        vec2 nuv = (v_uv - 0.5) * 2.0;
+        ca_intensity *= d * dot(nuv, nuv);
+        vec2 offset = dir * ca_intensity;
+        
+        // Offset outside screen so repeated pixels at the edges don't show
+        color.r = texture(s_texture, v_uv).r;
+        color.g = texture(s_texture, v_uv - offset).g;
+        color.b = texture(s_texture, v_uv - offset * 2.0).b;
 
         /*
             Eye adaptation
@@ -152,4 +179,4 @@ void main() {
     }
 
     f_color = vec4(color, 1.0);
-}
+} 
