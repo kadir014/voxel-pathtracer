@@ -40,7 +40,6 @@ layout(std430, binding = 1) buffer ExposureLayout {
     float u_adapted_exposure;
 };
 
-uniform float ChromaticAberration;
 
 /*
     ACES filmic tone mapping curve
@@ -67,8 +66,8 @@ void main() {
             2. Lens aberration
             3. Exposure adjustment
             4. Tonemapping
+            6. Gamma correction and convert to sRGB [0, 1]
             5. Color grading (contrast, saturation, ...)
-            6. Gamma correction and convert to sRGB. [0, 1]
         */
 
         /*
@@ -79,6 +78,9 @@ void main() {
             Since chromatic aberration happens on the lens by affecting the
             individual wavelengths, I think it's most sensible to do this
             in HDR space before any color grading and tonemapping.
+
+            Note: In real life cameras, chromatic aberration mostly affects
+            1-2 pixels at max. So keeping the intensity low will be better.
         */
         float ca_intensity = u_chromatic_aberration;
         
@@ -148,6 +150,13 @@ void main() {
         }
 
         /*
+            Gamma Correction
+            ----------------
+            Map the colors onto non-linear sRGB space.
+        */
+        color = pow(color, vec3(GAMMA));
+
+        /*
             Brightness
             ----------
             - A value of 0.0 is neutral and does nothing.
@@ -176,9 +185,6 @@ void main() {
             - Over 1.0 the colors start to get stronger.
         */
         color = mix(vec3(luminance(color)), color, u_saturation);
-
-        // Gamma correction, the color is in LDR sRGB space.
-        color = pow(color, vec3(GAMMA));
     }
 
     f_color = vec4(color, 1.0);

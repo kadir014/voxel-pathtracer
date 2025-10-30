@@ -9,6 +9,7 @@
 """
 
 from math import pi
+from time import perf_counter
 
 import pygame
 import imgui
@@ -37,6 +38,10 @@ class Sandbox(Scene):
         self.current_color_profile = 0
 
         self.current_block = 1
+
+        self.__acc = 0.0
+        self.__acc_last = perf_counter()
+        self.__rays_per_sec = 0.0
 
     def update(self) -> None:
         app = shared.app
@@ -130,6 +135,10 @@ class Sandbox(Scene):
                 elif event.key == pygame.K_8:
                     self.current_block = 8
                     renderer.update_ui(self.current_block - 1)
+
+                elif event.key == pygame.K_9:
+                    self.current_block = 9
+                    renderer.update_ui(self.current_block - 1)
         
         mouse_rel = pygame.Vector2(*pygame.mouse.get_rel())
 
@@ -208,7 +217,6 @@ class Sandbox(Scene):
             imgui.text(f"FPS: {round(app.clock.get_fps())}")
             imgui.text(f"Resolution: {app._resolution[0]}x{app._resolution[1]}")
             imgui.text(f"Renderer: {app._logical_resolution[0]}x{app._logical_resolution[1]} ({round(app.logical_scale, 2)}x)")
-            imgui.text(f"Rays: {round(renderer.frame_ray_count / 1000000.0, 1)} million rays/frame")
 
             if not HIDE_HW_INFO:
                 imgui.text(f"CPU: {app.cpu_info['name']}")
@@ -220,6 +228,37 @@ class Sandbox(Scene):
             imgui.text(f"ModernGL:  {app.moderngl_version}")
             imgui.text(f"OpenGL:    {app.opengl_version}")
             imgui.text(f"ImGUI:     {app.imgui_version}")
+
+            imgui.tree_pop()
+
+        if imgui.tree_node("Statistics", imgui.TREE_NODE_FRAMED):
+            _, renderer.settings.collect_information = imgui.checkbox("Collect stats (affects performance *heavily*)", renderer.settings.collect_information)
+
+            if not renderer.settings.collect_information:
+                imgui.text(f"Rays launched per frame: 0")
+                imgui.text(f"Rays launched per second: 0")
+                imgui.text(f"Primary rays launched: 0")
+            else:
+                imgui.text(f"Rays launched per frame: {round(renderer.frame_ray_count / 1000000.0, 1)} million")
+
+                self.__acc += renderer.frame_ray_count
+                
+                now = perf_counter()
+                if now - self.__acc_last > 1.0:
+                    self.__acc_last = now
+                    self.__rays_per_sec = self.__acc
+                    self.__acc = 0.0
+
+                rays_per_sec = self.__rays_per_sec / 1000000.0
+                rays_per_sec_u = "million"
+                if rays_per_sec > 1000.0:
+                    rays_per_sec /= 1000.0
+                    rays_per_sec_u = "billion"
+
+                imgui.text(f"Rays launched per second: {round(rays_per_sec, 1)} {rays_per_sec_u}")
+
+                primary_rays = renderer._logical_resolution[0] * renderer._logical_resolution[1] * renderer.settings.ray_count
+                imgui.text(f"Primary rays launched: {round(primary_rays / 1000000.0, 1)} million")
 
             imgui.tree_pop()
 
@@ -244,8 +283,8 @@ class Sandbox(Scene):
             _, renderer.settings.chromatic_aberration = imgui.slider_float("Chromatic Aberration", renderer.settings.chromatic_aberration, 0.000, 0.010, format="%.4f")
             _, renderer.settings.exposure  = imgui.slider_float("Exposure", renderer.settings.exposure, -5.0, 5.0, format="%.1f")
             _, renderer.settings.brightness = imgui.slider_float("Brightness", renderer.settings.brightness, -0.5, 0.5, format="%.4f")
-            _, renderer.settings.contrast = imgui.slider_float("Contrast", renderer.settings.contrast, 0.0, 1.2, format="%.4f")
-            _, renderer.settings.saturation = imgui.slider_float("Saturation", renderer.settings.saturation, 0.0, 1.75, format="%.4f")
+            _, renderer.settings.contrast = imgui.slider_float("Contrast", renderer.settings.contrast, 0.0, 2.0, format="%.4f")
+            _, renderer.settings.saturation = imgui.slider_float("Saturation", renderer.settings.saturation, 0.0, 2.5, format="%.4f")
 
             _, renderer.settings.enable_eye_adaptation = imgui.checkbox("Auto exposure adaptation", renderer.settings.enable_eye_adaptation)
             imgui.text(f"Adapted exposure: {round(renderer.settings.adapted_exposure, 3)}")

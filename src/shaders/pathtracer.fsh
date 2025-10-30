@@ -777,7 +777,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
         else surface_id = 2.0;
 
         float atlas_w = 1.0 / 3.0;
-        float atlas_h = 1.0 / 8.0; // TODO: Pass block row count as uniform (or pass 1/h)
+        float atlas_h = 1.0 / 9.0; // TODO: Pass block row count as uniform (or pass 1/h)
 
         vec2 atlas_uv = hitinfo.face_uv;
         atlas_uv.x = atlas_uv.x * atlas_w + float(surface_id) * atlas_w;

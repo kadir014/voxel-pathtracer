@@ -25,7 +25,8 @@ BLOCK_IDS = (
     "iron_block",
     "lime_wool",
     "red_wool",
-    "red_light"
+    "red_light",
+    "copper_block"
 )
 
 

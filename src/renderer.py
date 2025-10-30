@@ -306,9 +306,9 @@ class RendererSettings:
     def color_profile_custom(self) -> None:
         """ Set to custom color profile which I thought looked good with ACES. """
 
-        self.exposure = -1.993
-        self.brightness = 0.000235
-        self.contrast = 1.030
+        self.exposure = -2.1
+        self.brightness = -0.0052
+        self.contrast = 1.206
         self.saturation = 1.32
 
     def color_profile_zero(self) -> None:
@@ -320,9 +320,9 @@ class RendererSettings:
         self.saturation = 1.0
 
     def color_profile_noir(self) -> None:
-        self.exposure = -3.1
-        self.brightness = 0.0005
-        self.contrast = 1.043
+        self.exposure = -3.6
+        self.brightness = -0.056
+        self.contrast = 1.556
         self.saturation = 0.0
 
 
@@ -639,6 +639,8 @@ class Renderer:
             "lime_wool": pygame.image.load("data/blocks/lime_wool.png"),
             "red_wool": pygame.image.load("data/blocks/red_wool.png"),
             "red_light_emissive": pygame.image.load("data/blocks/red_light_emissive.png"),
+            "copper_block": pygame.image.load("data/blocks/copper_block.png"),
+            "copper_block_roughness": pygame.image.load("data/blocks/copper_block_roughness.png")
         }
 
         # albedo atlas
@@ -651,7 +653,8 @@ class Renderer:
             "iron_block": ("iron_block", "iron_block", "iron_block"),
             "lime_wool": ("lime_wool", "lime_wool", "lime_wool"),
             "red_wool": ("red_wool", "red_wool", "red_wool"),
-            "red_light": (0, 0, 0)
+            "red_light": (0, 0, 0),
+            "copper_block": ("copper_block", "copper_block", "copper_block")
         }
 
         self.emissive_atlas = {
@@ -664,6 +667,7 @@ class Renderer:
             "lime_wool": (0, 0, 0),
             "red_wool": (0, 0, 0),
             "red_light": ("red_light_emissive", "red_light_emissive", "red_light_emissive"),
+            "copper_block": (0, 0, 0),
         }
 
         self.roughness_atlas = {
@@ -676,6 +680,7 @@ class Renderer:
             "lime_wool": (50, 50, 50),
             "red_wool": (50, 50, 50),
             "red_light": (50, 50, 50),
+            "copper_block": ("copper_block_roughness", "copper_block_roughness", "copper_block_roughness")
         }
 
         self.metallic_atlas = {
@@ -688,6 +693,7 @@ class Renderer:
             "lime_wool": (0, 0, 0),
             "red_wool": (0, 0, 0),
             "red_light": (0, 0, 0),
+            "copper_block": (100, 100, 100)
         }
 
         # Cache scalar surfaces
@@ -796,7 +802,7 @@ class Renderer:
         )
         self.ui_surface.blit(self.hotbar_sel_surf, self.hotbar_sel_surf.get_rect(centerx=hotbar_sel_pos[0], top=hotbar_sel_pos[1]))
 
-        for i in range(1, min(9, len(BLOCK_IDS))):
+        for i in range(1, min(9, len(BLOCK_IDS)) + 1):
             block = BLOCK_IDS[i]
 
             if block == "grass":
@@ -1050,6 +1056,8 @@ class Renderer:
             )
 
     def get_frame_ray_count(self, pt_fbo: moderngl.Framebuffer) -> None:
+        # This calculation is probably wrong, I need to rewrite it
+
         frame_bounces = 0
 
         # f1 -> unsigned byte
@@ -1065,13 +1073,17 @@ class Renderer:
         max_samples = float(self.settings.ray_count)
         inv_samples = 1.0 / 255.0
 
+        camera_rays = numpy.sum(data + 1)
+
         # go back to total_bounces
         # float normalized_bounces = (float(total_bounces) / float(u_ray_count) / float(u_bounces));
         pixel_bounces = data * inv_samples * max_bounces * max_samples * nee_factor
-        frame_bounces = numpy.sum(pixel_bounces)
+        world_bounces = numpy.sum(pixel_bounces)
+
+        frame_bounces = camera_rays * max_samples + world_bounces
 
         # Sample count x bounces
-        self.frame_ray_count = self.settings.ray_count * frame_bounces
+        self.frame_ray_count = frame_bounces
 
     def render(self, ui: bool = True) -> None:
         """
