@@ -238,7 +238,7 @@ class Sandbox(Scene):
                 elif self.current_color_profile == 2:
                     renderer.settings.color_profile_noir()
 
-            tm_name = ("None", "ACES Filmic")[renderer.settings.tonemapper]
+            tm_name = ("Clamp", "ACES Filmic")[renderer.settings.tonemapper]
             _, renderer.settings.tonemapper = imgui.slider_int(f"Tonemapper", renderer.settings.tonemapper, 0, 1, format=tm_name)
 
             _, renderer.settings.chromatic_aberration = imgui.slider_float("Chromatic Aberration", renderer.settings.chromatic_aberration, 0.000, 0.010, format="%.4f")
@@ -270,8 +270,8 @@ class Sandbox(Scene):
 
             _, renderer.settings.bounces = imgui.slider_int(f"Bounces", renderer.settings.bounces, 1, MAX_BOUNCES)
 
-            noise_name = ("None", "Mulberry32 PRNG", "Heitz Bluenoise")[renderer.settings.noise_method]
-            _, renderer.settings.noise_method = imgui.slider_int(f"Noise method", renderer.settings.noise_method, 0, 2, format=noise_name)
+            noise_name = ("Mulberry32 PRNG", "Heitz Bluenoise")[renderer.settings.noise_method-1]
+            _, renderer.settings.noise_method = imgui.slider_int(f"Noise method", renderer.settings.noise_method, 1, 2, format=noise_name)
 
             _, renderer.settings.russian_roulette = imgui.checkbox("Russian-roulette", renderer.settings.russian_roulette)
             _, renderer.settings.enable_accumulation = imgui.checkbox("Temporal accumulation", renderer.settings.enable_accumulation)
@@ -312,7 +312,7 @@ class Sandbox(Scene):
             _, renderer.settings.enable_sky_texture = imgui.checkbox("Use sky texture", renderer.settings.enable_sky_texture)
             _, renderer.settings.sky_color = imgui.color_edit3("Sky color", *renderer.settings.sky_color, imgui.COLOR_EDIT_NO_INPUTS)
 
-            _, renderer.settings.sun_radiance = imgui.slider_float(f"Sun radiance", renderer.settings.sun_radiance, 0.0, 5000.0)
+            #_, renderer.settings.sun_radiance = imgui.slider_float(f"Sun radiance", renderer.settings.sun_radiance, 0.0, 5000.0)
             _, renderer.settings.sun_angular_radius = imgui.slider_float(f"Sun angular radius", renderer.settings.sun_angular_radius, 0.0, pi)
             _, renderer.settings.sun_yaw = imgui.slider_float(f"Sun yaw", renderer.settings.sun_yaw, 0.0, 360.0)
             _, renderer.settings.sun_pitch = imgui.slider_float(f"Sun pitch", renderer.settings.sun_pitch, -90.0, 90.0)

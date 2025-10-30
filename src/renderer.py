@@ -83,7 +83,7 @@ class RendererSettings:
         self.collect_information = False
 
         self.sun_yaw = 0.0
-        self.sun_pitch = 60.0
+        self.sun_pitch = 30.0
 
     @property
     def postprocessing(self) -> bool:
@@ -250,11 +250,11 @@ class RendererSettings:
         self.__renderer._pt_program["u_antialiasing"].value = value
 
     @property
-    def sun_radiance(self) -> float:
+    def sun_radiance(self) -> tuple[float, float, float]:
         return self.__renderer._pt_program["u_sun_radiance"].value
     
     @sun_radiance.setter
-    def sun_radiance(self, value: float) -> None:
+    def sun_radiance(self, value: tuple[float, float, float]) -> None:
         self.__renderer._pt_program["u_sun_radiance"].value = value
 
     @property
@@ -438,6 +438,8 @@ class Renderer:
         self._post_program["u_enable_post"] = True
         self._post_program["u_tonemapper"] = 1
         self._post_program["u_chromatic_aberration"] = 0.0035
+        self._post_program["s_texture"] = 0
+        self._post_program["s_lum"] = 1
 
         self._post_vao = self._context.vertex_array(
             self._post_program,
@@ -462,7 +464,7 @@ class Renderer:
         self._pt_program["s_previous_normal"] = 8
         self._pt_program["u_ray_count"] = 8
         self._pt_program["u_bounces"] = 3
-        self._pt_program["u_noise_method"] = 2
+        self._pt_program["u_noise_method"] = 1
         self._pt_program["u_enable_roulette"] = False
         self._pt_program["u_enable_sky_texture"] = True
         self._pt_program["u_enable_nee"] = True
@@ -470,11 +472,11 @@ class Renderer:
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = shared.world.voxel_size
         self._pt_program["u_enable_accumulation"] = True
-        self._pt_program["u_antialiasing"] = 2
+        self._pt_program["u_antialiasing"] = 1
         self._pt_program["u_exp_raymarch"] = 0
         self._pt_program["u_sun_direction"] = pygame.Vector3(0.0, 1.0, 1.0).normalize()
-        self._pt_program["u_sun_radiance"] = 500.0
-        self._pt_program["u_sun_angular_radius"] = 0.2
+        self._pt_program["u_sun_radiance"] = (1500.0, 1500.0, 1500.0)
+        self._pt_program["u_sun_angular_radius"] = 0.0275
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -607,7 +609,7 @@ class Renderer:
         self.write_heinz_data()
 
 
-        sky_surf = pygame.image.load("data/sky/qwantani_noon_puresky.png")
+        sky_surf = pygame.image.load("data/sky/qwantani_dusk_2_puresky.png")
         self._sky_texture = self._context.texture(
             sky_surf.get_size(),
             3,
@@ -1146,18 +1148,18 @@ class Renderer:
         previous_normal.use(8)
         self._pt_vao.render()
 
+        if (self.settings.enable_eye_adaptation):
+            current_target.build_mipmaps()
+            current_target.filter = (moderngl.NEAREST_MIPMAP_NEAREST, moderngl.NEAREST_MIPMAP_NEAREST)
+        else:
+            current_target.filter = (moderngl.NEAREST, moderngl.NEAREST)
+
         if self.settings.pathtracer_output == 0:
             ... # Current target stays the same
         elif self.settings.pathtracer_output == 1:
             current_target = current_normal
         elif self.settings.pathtracer_output == 2:
             current_target = current_bounces
-
-        if (self.settings.noise_method == 2):
-            current_target.build_mipmaps()
-            current_target.filter = (moderngl.NEAREST_MIPMAP_NEAREST, moderngl.NEAREST_MIPMAP_NEAREST)
-        else:
-            current_target.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
         self._denoise_fbo.use()
         current_target.use(0)
@@ -1166,11 +1168,13 @@ class Renderer:
         if self.settings.antialiasing in (0, 1):
             self._post_fbo.use()
             self._denoise_target_texture.use(0)
+            current_target.use(1)
             self._post_vao.render()
 
         elif self.settings.antialiasing == 2:
             self._fxaa_fbo.use()
             self._denoise_target_texture.use(0)
+            current_target.use(1)
             self._post_vao.render()
 
             self._post_fbo.use()
@@ -1190,8 +1194,8 @@ class Renderer:
         else:
             self.pingpong_frame = 0
         
-        #if self.settings.collect_information:
-        self.get_frame_ray_count(current_fbo)
+        if self.settings.collect_information:
+            self.get_frame_ray_count(current_fbo)
 
     def high_quality_snapshot(self) -> None:
         """ Render with temporary high quality settings and save a snapshot. """

@@ -44,7 +44,7 @@ uniform bool u_enable_accumulation;
 uniform int u_antialiasing;
 uniform int u_exp_raymarch;
 uniform vec3 u_sun_direction;
-uniform float u_sun_radiance;
+uniform vec3 u_sun_radiance;
 uniform float u_sun_angular_radius;
 
 uniform sampler3D s_grid;
@@ -655,19 +655,28 @@ void sample_sun_cone(
     out vec3 world_dir,
     out float pdf
 ) {
-    // There most be a better way...
-    // Great read for sampling lights  https://theses.hal.science/tel-00977100v2/file/LU_HEQI_2014.pdf
-    
-    float r1 = prng();
-    float r2 = prng();
+    // There must be a better way...
 
-    float cosThetaMax = cos(sun_angular_radius);
-    float cosTheta = 1.0 - r1 * (1.0 - cosThetaMax);
-    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-    float phi = 2.0 * PI * r2;
+    // We want to sample the sun disk over the hemisphere which creates a cone
+    
+    float r0 = 0.0;
+    float r1 = 0.0;
+    if (u_noise_method == NOISE_METHOD_PRNG) {
+        r0 = prng();
+        r1 = prng();
+    }
+    else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
+        r0 = heitz_sample();
+        r1 = heitz_sample();
+    }
+
+    float cos_theta_max = cos(sun_angular_radius);
+    float cos_theta = 1.0 - r0 * (1.0 - cos_theta_max);
+    float sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+    float phi = 2.0 * PI * r1;
 
     // Spherical
-    vec3 local = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+    vec3 local = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
 
     // Should I use the same basis in GGX importance sampler?
     vec3 w = normalize(sun_dir);
@@ -681,8 +690,8 @@ void sample_sun_cone(
         w * local.z
     );
 
-    float solidAngle = 2.0 * PI * (1.0 - cosThetaMax);
-    pdf = 1.0 / solidAngle;
+    float solid_angle = 2.0 * PI * (1.0 - cos_theta);
+    pdf = 1.0 / solid_angle;
 }
 
 bool is_ray_occluded(vec3 pos, vec3 dir) {
@@ -717,11 +726,17 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
             primary_hit = hitinfo;
         }
 
-        /* Ray did not hit anything, sample sky. */
-
+        // Ray did not hit anything, sample sky
         if (!hitinfo.hit) {
-            float angle_to_sun = acos(dot(ray.dir, u_sun_direction));
-            if (angle_to_sun < u_sun_angular_radius) {
+            float cos_angle = dot(ray.dir, u_sun_direction);
+            float cos_theta_max = cos(u_sun_angular_radius);
+
+            // We shouldn't show the sun in the sky to avoid double-counting lights
+            // if NEE is enabled, BRDF shouldn't reach the sun.
+            bool show_sun = (cos_angle >= cos_theta_max) &&
+                            (!u_enable_nee || total_bounces == 0);
+
+            if (show_sun) {
                 radiance += u_sun_radiance * radiance_delta;
                 break;
             }
@@ -817,7 +832,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
                     nee_brdf = specular_brdf(V, N, sun_world_dir, H, state, nee_pdf);
                 }
 
-                radiance += radiance_delta * nee_brdf * vec3(u_sun_radiance) * NoL / sun_pdf;
+                radiance += radiance_delta * nee_brdf * u_sun_radiance * NoL / sun_pdf;
             }
         }
 
@@ -897,8 +912,7 @@ void main() {
 
         vec2 ray_pos = v_uv * 2.0 - 1.0;
 
-        // TODO: Currently doesn't work with temporal reprojecting.
-        if (u_antialiasing == ANTIALIASING_JITTERSAMPLING && !u_enable_accumulation) {
+        if (u_antialiasing == ANTIALIASING_JITTERSAMPLING) {
             /*
                 Jitter sampling:
 
@@ -908,8 +922,8 @@ void main() {
                 But works with single frame renders as well.
                 We can use whitenoise PRNG as this doesn't affect UV.
             */
-            float pixel_width = 1.0 / u_resolution.x;
-            float jitter_amount = pixel_width * 4.0;
+            vec2 jitter_amount = 1.0 / u_resolution;
+            jitter_amount *= 2.0;
             ray_pos += vec2(prng() - 0.5, prng() - 0.5) * jitter_amount;
         }
 

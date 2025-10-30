@@ -24,6 +24,8 @@ in vec2 v_uv;
 out vec4 f_color;
 
 uniform sampler2D s_texture;
+uniform sampler2D s_lum;
+
 uniform bool u_enable_post;
 uniform float u_chromatic_aberration;
 uniform float u_exposure;
@@ -106,7 +108,7 @@ void main() {
         if (u_enable_eye_adaptation) {
             // Lowest mipmap level -> log2(max(width, height))
             float min_mip = 10.0;
-            float luma = textureLod(s_texture, v_uv, min_mip).a;
+            float luma = textureLod(s_lum, v_uv, min_mip).a;
 
             // Adaptation speed is framerate-dependant, you have to explicitly adjust it
             float target_exposure = log2(0.01 / max(luma, 1e-4)) + u_exposure;
@@ -126,6 +128,7 @@ void main() {
             - EV = -1.0 -> 0.7x darker
             - EV = 0.0 -> Neutral
             - EV = 1.0 -> 1.4x brighter
+            - EV = 2.0 -> 2.0x brighter (one full-stop)
         */
         color *= pow(SQRT2, final_exposure);
 
