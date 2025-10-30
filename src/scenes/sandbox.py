@@ -8,6 +8,8 @@
 
 """
 
+from math import pi
+
 import pygame
 import imgui
 
@@ -206,6 +208,7 @@ class Sandbox(Scene):
             imgui.text(f"FPS: {round(app.clock.get_fps())}")
             imgui.text(f"Resolution: {app._resolution[0]}x{app._resolution[1]}")
             imgui.text(f"Renderer: {app._logical_resolution[0]}x{app._logical_resolution[1]} ({round(app.logical_scale, 2)}x)")
+            imgui.text(f"Rays: {round(renderer.frame_ray_count / 1000000.0, 1)} million rays/frame")
 
             if not HIDE_HW_INFO:
                 imgui.text(f"CPU: {app.cpu_info['name']}")
@@ -280,6 +283,9 @@ class Sandbox(Scene):
             up_name = ("Nearest", "Bilinear", "Bicubic")[renderer.settings.upscaling_method]
             _, renderer.settings.upscaling_method = imgui.slider_int(f"Upscaler", renderer.settings.upscaling_method, 0, 2, format=up_name)
 
+            out_name = ("GI", "Normals", "Bounces")[renderer.settings.pathtracer_output]
+            _, renderer.settings.pathtracer_output = imgui.slider_int(f"Out texture", renderer.settings.pathtracer_output, 0, 2, format=out_name)
+
             if imgui.tree_node("High-quality render settings"):
                 _, renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", renderer.settings.highquality_ray_count, 512, 2048)
                 _, renderer.settings.highquality_bounces = imgui.slider_int(f"Bounces", renderer.settings.highquality_bounces, 5, 35)
@@ -295,15 +301,21 @@ class Sandbox(Scene):
             if clicked:
                 renderer.settings.denoiser_id = selected_denoiser
 
-            _, renderer._denoise_program["u_hw"] = imgui.slider_int(f"u_hw", renderer._denoise_program["u_hw"].value, 1, 14)
-            _, renderer._denoise_program["u_sigmaspace"] = imgui.slider_float(f"u_sigmaspace", renderer._denoise_program["u_sigmaspace"].value, 0.1, 50.0)
-            _, renderer._denoise_program["u_sigmacolor"] = imgui.slider_float(f"u_sigmacolor", renderer._denoise_program["u_sigmacolor"].value, 0.1, 50.0)
+            if selected_denoiser == 1:
+                _, renderer._denoise_program["u_hw"] = imgui.slider_int(f"u_hw", renderer._denoise_program["u_hw"].value, 1, 14)
+                _, renderer._denoise_program["u_sigmaspace"] = imgui.slider_float(f"u_sigmaspace", renderer._denoise_program["u_sigmaspace"].value, 0.1, 50.0)
+                _, renderer._denoise_program["u_sigmacolor"] = imgui.slider_float(f"u_sigmacolor", renderer._denoise_program["u_sigmacolor"].value, 0.1, 50.0)
 
             imgui.tree_pop()
 
         if imgui.tree_node("Sky", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
             _, renderer.settings.enable_sky_texture = imgui.checkbox("Use sky texture", renderer.settings.enable_sky_texture)
             _, renderer.settings.sky_color = imgui.color_edit3("Sky color", *renderer.settings.sky_color, imgui.COLOR_EDIT_NO_INPUTS)
+
+            _, renderer.settings.sun_radiance = imgui.slider_float(f"Sun radiance", renderer.settings.sun_radiance, 0.0, 5000.0)
+            _, renderer.settings.sun_angular_radius = imgui.slider_float(f"Sun angular radius", renderer.settings.sun_angular_radius, 0.0, pi)
+            _, renderer.settings.sun_yaw = imgui.slider_float(f"Sun yaw", renderer.settings.sun_yaw, 0.0, 360.0)
+            _, renderer.settings.sun_pitch = imgui.slider_float(f"Sun pitch", renderer.settings.sun_pitch, -90.0, 90.0)
 
             imgui.tree_pop()
 

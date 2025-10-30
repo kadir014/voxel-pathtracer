@@ -13,10 +13,11 @@ from typing import TextIO
 from array import array
 from struct import unpack, pack
 from time import perf_counter
-from math import log
+from math import log, sin, cos, radians
 
 import pygame
 import moderngl
+import numpy
 
 from src import shared
 from src.world import BLOCK_IDS
@@ -73,6 +74,16 @@ class RendererSettings:
             "None",
             "Bilateral",
         ]
+
+        # 0 -> Pathtraced global illumination
+        # 1 -> Normals
+        # 2 -> Bounces
+        self.pathtracer_output = 0
+
+        self.collect_information = False
+
+        self.sun_yaw = 0.0
+        self.sun_pitch = 60.0
 
     @property
     def postprocessing(self) -> bool:
@@ -237,6 +248,22 @@ class RendererSettings:
     @antialiasing.setter
     def antialiasing(self, value: int) -> None:
         self.__renderer._pt_program["u_antialiasing"].value = value
+
+    @property
+    def sun_radiance(self) -> float:
+        return self.__renderer._pt_program["u_sun_radiance"].value
+    
+    @sun_radiance.setter
+    def sun_radiance(self, value: float) -> None:
+        self.__renderer._pt_program["u_sun_radiance"].value = value
+
+    @property
+    def sun_angular_radius(self) -> float:
+        return self.__renderer._pt_program["u_sun_angular_radius"].value
+    
+    @sun_angular_radius.setter
+    def sun_angular_radius(self, value: float) -> None:
+        self.__renderer._pt_program["u_sun_angular_radius"].value = value
 
     @property
     def denoiser_id(self) -> int:
@@ -445,6 +472,9 @@ class Renderer:
         self._pt_program["u_enable_accumulation"] = True
         self._pt_program["u_antialiasing"] = 2
         self._pt_program["u_exp_raymarch"] = 0
+        self._pt_program["u_sun_direction"] = pygame.Vector3(0.0, 1.0, 1.0).normalize()
+        self._pt_program["u_sun_radiance"] = 500.0
+        self._pt_program["u_sun_angular_radius"] = 0.2
 
         self._pt_vao = self._context.vertex_array(
             self._pt_program,
@@ -513,18 +543,26 @@ class Renderer:
         self._pathtracer_target_normal0.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_normal1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_normal1.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._pathtracer_target_bounces0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
+        self._pathtracer_target_bounces0.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._pathtracer_target_bounces1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
+        self._pathtracer_target_bounces1.filter = (moderngl.LINEAR, moderngl.LINEAR)
         # Note: data type being f4 lets us store colors in HDR
         # Alpha channel in pathtracing textures is for luminance
         self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture0.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self._pathtracer_target_texture0.repeat_x = False
         self._pathtracer_target_texture0.repeat_y = False
-        self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture0,self._pathtracer_target_normal0))
+        self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(
+            self._pathtracer_target_texture0,self._pathtracer_target_normal0, self._pathtracer_target_bounces0)
+        )
         self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture1.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self._pathtracer_target_texture1.repeat_x = False
         self._pathtracer_target_texture1.repeat_y = False
-        self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(self._pathtracer_target_texture1,self._pathtracer_target_normal1))
+        self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(
+            self._pathtracer_target_texture1,self._pathtracer_target_normal1, self._pathtracer_target_bounces1)
+        )
 
 
         self._fxaa_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f1")
@@ -676,6 +714,9 @@ class Renderer:
         self.update_ui()
 
         self.pingpong_frame = 0
+
+        # Total number of rays shot from camera and bounces this frame
+        self.frame_ray_count = 0
 
     def __del__(self) -> None:
         self._context.release()
@@ -1006,6 +1047,30 @@ class Renderer:
                 )
             )
 
+    def get_frame_ray_count(self, pt_fbo: moderngl.Framebuffer) -> None:
+        frame_bounces = 0
+
+        # f1 -> unsigned byte
+        buffer = pt_fbo.read(attachment=2, components=1, dtype="f1")
+        data = numpy.frombuffer(buffer, dtype=numpy.uint8)
+        data = data.reshape((self._logical_resolution[0], self._logical_resolution[1], 1))
+
+        nee_factor = 1.0
+        if self.settings.nee:
+            nee_factor = 2.0
+
+        max_bounces = float(self.settings.bounces)
+        max_samples = float(self.settings.ray_count)
+        inv_samples = 1.0 / 255.0
+
+        # go back to total_bounces
+        # float normalized_bounces = (float(total_bounces) / float(u_ray_count) / float(u_bounces));
+        pixel_bounces = data * inv_samples * max_bounces * max_samples * nee_factor
+        frame_bounces = numpy.sum(pixel_bounces)
+
+        # Sample count x bounces
+        self.frame_ray_count = self.settings.ray_count * frame_bounces
+
     def render(self, ui: bool = True) -> None:
         """
         Render one frame.
@@ -1028,11 +1093,29 @@ class Renderer:
            Display
         """
 
+        # Build sun direction from spherical coords
+
+        pitch_r = radians(self.settings.sun_pitch)
+        yaw_r = radians(self.settings.sun_yaw)
+        pitch_c = cos(pitch_r)
+        pitch_s = sin(pitch_r)
+        yaw_c = cos(yaw_r)
+        yaw_s = sin(yaw_r)
+
+        sun_dir = pygame.Vector3(
+            yaw_c * pitch_c,
+            pitch_s,
+            yaw_s * pitch_c
+        )
+
+        self._pt_program["u_sun_direction"] = (sun_dir.x, sun_dir.y, sun_dir.z)
+
         self._context.disable(moderngl.BLEND)
 
         targets = (self._pathtracer_target_texture0, self._pathtracer_target_texture1)
         fbos = (self._pathtracer_fbo0, self._pathtracer_fbo1)
         normals = (self._pathtracer_target_normal0, self._pathtracer_target_normal1)
+        bounces = (self._pathtracer_target_bounces0, self._pathtracer_target_bounces1)
 
         # frame 0:
         # current fbo -> 0
@@ -1046,9 +1129,11 @@ class Renderer:
 
         frame = self.pingpong_frame
         current_fbo = fbos[frame % 2]
-        previous_normal = normals[(frame + 1 ) % 2]
         current_target = targets[frame % 2]
         previous_target = targets[(frame + 1 ) % 2]
+        current_normal = normals[frame % 2]
+        previous_normal = normals[(frame + 1 ) % 2]
+        current_bounces = bounces[frame % 2]
 
         current_fbo.use()
         self._voxel_tex.use(1)
@@ -1060,6 +1145,13 @@ class Renderer:
         previous_target.use(7)
         previous_normal.use(8)
         self._pt_vao.render()
+
+        if self.settings.pathtracer_output == 0:
+            ... # Current target stays the same
+        elif self.settings.pathtracer_output == 1:
+            current_target = current_normal
+        elif self.settings.pathtracer_output == 2:
+            current_target = current_bounces
 
         if (self.settings.noise_method == 2):
             current_target.build_mipmaps()
@@ -1097,6 +1189,9 @@ class Renderer:
             self.pingpong_frame += 1
         else:
             self.pingpong_frame = 0
+        
+        #if self.settings.collect_information:
+        self.get_frame_ray_count(current_fbo)
 
     def high_quality_snapshot(self) -> None:
         """ Render with temporary high quality settings and save a snapshot. """

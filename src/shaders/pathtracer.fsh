@@ -28,6 +28,7 @@
 in vec2 v_uv;
 layout(location = 0) out vec4 f_color;
 layout(location = 1) out vec4 f_normal;
+layout(location = 2) out vec4 f_bounces;
 
 
 uniform int u_ray_count;
@@ -37,9 +38,14 @@ uniform vec2 u_resolution;
 uniform float u_voxel_size;
 uniform bool u_enable_roulette;
 uniform bool u_enable_sky_texture;
+uniform bool u_enable_nee;
 uniform vec3 u_sky_color;
 uniform bool u_enable_accumulation;
 uniform int u_antialiasing;
+uniform int u_exp_raymarch;
+uniform vec3 u_sun_direction;
+uniform float u_sun_radiance;
+uniform float u_sun_angular_radius;
 
 uniform sampler3D s_grid;
 uniform sampler2D s_sky;
@@ -57,7 +63,7 @@ layout(std430, binding = 0) readonly buffer HeitzLayout {
 };
 
 layout(std430, binding = 2) buffer AccLayout {
-    int accumulations[1920 * 1080];
+    int accumulations[]; // Logical width x Logical height
 };
 
 
@@ -97,6 +103,9 @@ struct Material {
     float roughness; // Perceptual roughness [0, 1]
     float reflectance; // Base reflectance (F0) [0, 1] 
 };
+
+// Material preview feature only, will be removed
+uniform Material u_exp_material;
 
 
 HitInfo dda(Ray ray) {
@@ -194,6 +203,69 @@ HitInfo dda(Ray ray) {
 
             break;
         }
+    }
+
+    return hitinfo;
+}
+
+
+// SDFs are from https://iquilezles.org/articles/distfunctions/
+
+float sdf_sphere(vec3 p, vec3 center, float radius) {
+    return length(p - center) - radius;
+}
+
+float sdf_box(vec3 p, vec3 center, vec3 b) {
+    vec3 q = abs((p - center)) - b;
+    return length(max(q, 0.0)) + min(max(q.x,max(q.y,q.z)), 0.0);
+}
+
+float sdf_round_box(vec3 p, vec3 center, vec3 b, float r) {
+    vec3 q = abs((p - center)) - b + r;
+    return length(max(q, 0.0)) + min(max(q.x,max(q.y,q.z)), 0.0) - r;
+}
+
+float sdf(vec3 pos) {
+   //return min(sdf_sphere(pos, vec3(0.0), 1.5), sdf_box(pos, vec3(0.0), vec3(1.0)));
+
+   return sdf_sphere(pos, vec3(0.0), 1.0);
+   //return sdf_round_box(pos, vec3(0.0), vec3(1.0), 0.5);
+   //return sdf_box(pos, vec3(0.0), vec3(1.0));
+}
+
+vec3 estimate_normal(vec3 p) {
+    return normalize(vec3(
+        sdf(vec3(p.x + EPSILON, p.y, p.z)) - sdf(vec3(p.x - EPSILON, p.y, p.z)),
+        sdf(vec3(p.x, p.y + EPSILON, p.z)) - sdf(vec3(p.x, p.y - EPSILON, p.z)),
+        sdf(vec3(p.x, p.y, p.z  + EPSILON)) - sdf(vec3(p.x, p.y, p.z - EPSILON))
+    ));
+}
+
+HitInfo raymarch(Ray ray) {
+    HitInfo hitinfo = HitInfo(
+        false,
+        vec3(0.0),
+        vec3(0.0),
+        0,
+        vec2(0.0)
+    );
+
+    vec3 curr_pos = ray.origin;
+
+    for (int i = 0; i < 100; i++) {
+    	float dist = sdf(curr_pos);
+
+        if (dist < EPSILON) {
+            return HitInfo(
+                true,
+                curr_pos,
+                estimate_normal(curr_pos),
+                0,
+                vec2(0.0, 0.0)
+            );
+        }
+
+        curr_pos += ray.dir * dist;
     }
 
     return hitinfo;
@@ -331,26 +403,21 @@ vec3 random_in_unit_sphere() {
     return vec3(x, y, z);
 }
 
+
+struct BRDFState {
+    vec3 albedo;
+    float metallic;
+    float roughness;
+    vec3 f0;
+    float diffuse_weight;
+    float specular_weight;
+    float lobe;
+};
+
 /*
-    My physically-based material BRDF.
-    Heavily inspired by UE4's sampler showcased in Brian Karis' paper.
-
-    Uses a "metalness" workflow.
-    Lambertian BRDF for diffuse and Cook-Torrance microfacet model for specular.
+    Prepare material properties and lobe weights for sampling BRDFs.
 */
-vec3 sample_brdf(
-    vec3 N,
-    vec3 V,
-    Material material,
-    out vec3 L,
-    out float pdf
-) {
-    /*
-        1. Choose which reflectance to sample (diffuse or specular)
-        2. Calculate L (reflected ray direction)
-        3. Sample weighted BRDFs
-    */
-
+BRDFState prepare_brdf(Material material) {
     vec3 albedo = material.albedo;
     float metallic = clamp(material.metallic, 0.0, 1.0);
 
@@ -378,8 +445,6 @@ vec3 sample_brdf(
     diffuse_weight *= inv_weight;
     specular_weight *= inv_weight;
 
-    vec3 brdf = vec3(0.0);
-
     float lobe = 0.0;
     if (u_noise_method == NOISE_METHOD_PRNG) {
         lobe = prng();
@@ -388,45 +453,136 @@ vec3 sample_brdf(
         lobe = heitz_sample();
     }
 
-    if (prng() < diffuse_weight) {
-        /*
-            Sample diffuse BRDF
+    return BRDFState(
+        albedo,
+        metallic,
+        roughness,
+        f0,
+        diffuse_weight,
+        specular_weight,
+        lobe
+    );
+}
 
-            Lambertian model:
-            -----------------
-            f = albedo / pi
-            pdf = NoL / pi
-        */
+vec3 diffuse_brdf(
+    vec3 V,
+    vec3 N,
+    vec3 L,
+    BRDFState state,
+    out float pdf
+) {
+    /*
+        Sample diffuse BRDF
 
+        Lambertian model:
+        -----------------
+        f = albedo / pi
+        pdf = NoL / pi
+    */
+
+    float NoL = dot(N, L);
+    if (NoL <= 0.0) {
+        pdf = 0.0;
+        return vec3(0.0);
+    }
+
+    vec3 brdf = state.albedo / PI;
+    brdf *= NoL;
+
+    pdf = NoL / PI;
+    pdf *= state.diffuse_weight;
+
+    return brdf;
+}
+
+vec3 specular_brdf(
+    vec3 V,
+    vec3 N,
+    vec3 L,
+    vec3 H,
+    BRDFState state,
+    out float pdf
+) {
+    /*
+        Sample specular BRDF
+
+        Cook-Torrance microfacet model:
+        -------------------------------
+        D -> Normal distrubiton function term (How microfacets are oriented)
+        F -> Fresnel term
+        G -> Geometry term (How many microfacets are visible)
+
+        f = D * G * F / (4 * NoL * NoV)
+        pdf = D * NoH / (4 * VoH)
+    */
+
+    float NoL = dot(N, L);
+    float NoV = dot(N, V);
+
+    if (NoL <= 0.0 || NoV <= 0.0) {
+        pdf = 0.0;
+        return vec3(0.0);
+    }
+
+    float NoH = dot(N, H);
+    float VoH = dot(V, H);
+
+    NoL = clamp(NoL, 0.0, 1.0);
+    NoV = clamp(NoV, 0.0, 1.0);
+    NoH = clamp(NoH, 0.0, 1.0);
+    VoH = clamp(VoH, 0.0, 1.0);
+
+    float D = D_GGX(NoH, state.roughness);
+    float G = G_Smith(NoV, NoL, state.roughness);
+    vec3 F = F_Schlick(state.f0, VoH);
+
+    vec3 brdf = (D * G * F) / (4.0 * NoL * NoV);
+    brdf *= NoL;
+
+    pdf = D * NoH / (4.0 * VoH);
+    pdf *= state.specular_weight;
+
+    return brdf;
+}
+
+/*
+    My physically-based material BRDF.
+    Heavily inspired by UE4's sampler showcased in Brian Karis' paper.
+
+    Uses a "metalness" workflow.
+    Lambertian BRDF for diffuse and Cook-Torrance microfacet model for specular.
+
+    N        -> Surface normal
+    V        -> View direction
+    material -> Surface material
+    L        -> Reflected ray direction
+    pdf      -> PDF of the sampled BRDF
+    return   -> Sampled radiance (multiplied by NoL)
+*/
+vec3 sample_brdf(
+    vec3 N,
+    vec3 V,
+    Material material,
+    out vec3 L,
+    out float pdf
+) {
+    /*
+        1. Choose which reflectance to sample (diffuse or specular)
+        2. Calculate L (reflected ray direction)
+        3. Sample weighted BRDFs
+    */
+
+    BRDFState state = prepare_brdf(material);
+
+    // Sample diffuse BRDF
+    if (state.lobe < state.diffuse_weight) {
         // Cosine weighted hemisphere
         L = normalize(N + random_in_unit_sphere());
 
-        float NoL = dot(N, L);
-        if (NoL <= 0.0) {
-            pdf = 0.0;
-            return vec3(0.0);
-        }
-
-        brdf = albedo / PI;
-        brdf *= NoL;
-
-        pdf = NoL / PI;
-        pdf *= diffuse_weight;
+        return diffuse_brdf(V, N, L, state, pdf);
     }
+    // Sample specular BRDF
     else {
-        /*
-            Sample specular BRDF
-
-            Cook-Torrance microfacet model:
-            -------------------------------
-            D -> Normal distrubiton function term (How microfacets are oriented)
-            F -> Fresnel term
-            G -> Geometry term (How many microfacets are visible)
-
-            f = D * G * F / (4 * NoL * NoV)
-            pdf = D * NoH / (4 * VoH)
-        */
-
         vec2 xi = vec2(0.0);
         if (u_noise_method == NOISE_METHOD_PRNG) {
             xi.x = prng();
@@ -437,37 +593,15 @@ vec3 sample_brdf(
             xi.y = heitz_sample();
         }
 
-        vec3 H = GGX_importance_sample(xi, roughness, N);
+        vec3 H = GGX_importance_sample(xi, state.roughness, N);
         L = 2.0 * dot(V, H) * H - V;
 
-        float NoL = dot(N, L);
-        float NoV = dot(N, V);
-
-        if (NoL <= 0.0 || NoV <= 0.0) {
-            pdf = 0.0;
-            return vec3(0.0);
-        }
-
-        float NoH = dot(N, H);
-        float VoH = dot(V, H);
-
-        NoL = clamp(NoL, 0.0, 1.0);
-        NoV = clamp(NoV, 0.0, 1.0);
-        NoH = clamp(NoH, 0.0, 1.0);
-        VoH = clamp(VoH, 0.0, 1.0);
-
-        float D = D_GGX(NoH, roughness);
-        float G = G_Smith(NoV, NoL, roughness);
-        vec3 F = F_Schlick(f0, VoH);
-
-        brdf = (D * G * F) / (4.0 * NoL * NoV);
-        brdf *= NoL;
-
-        pdf = D * NoH / (4.0 * VoH);
-        pdf *= specular_weight;
+        return specular_brdf(V, N, L, H, state, pdf);
     }
 
-    return brdf;
+    L = vec3(0.0);
+    pdf = 0.0;
+    return vec3(0.0);
 }
 
 /*
@@ -514,42 +648,108 @@ vec3 reproject(vec3 world_pos) {
     return vec3(uv, 1.0);
 }
 
+
+void sample_sun_cone(
+    vec3 sun_dir,
+    float sun_angular_radius,
+    out vec3 world_dir,
+    out float pdf
+) {
+    // There most be a better way...
+    // Great read for sampling lights  https://theses.hal.science/tel-00977100v2/file/LU_HEQI_2014.pdf
+    
+    float r1 = prng();
+    float r2 = prng();
+
+    float cosThetaMax = cos(sun_angular_radius);
+    float cosTheta = 1.0 - r1 * (1.0 - cosThetaMax);
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+    float phi = 2.0 * PI * r2;
+
+    // Spherical
+    vec3 local = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+
+    // Should I use the same basis in GGX importance sampler?
+    vec3 w = normalize(sun_dir);
+    vec3 up = abs(w.z) > 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 tangent = normalize(cross(up, w));
+    vec3 bitangent = cross(w, tangent);
+
+    world_dir = normalize(
+        tangent * local.x +
+        bitangent * local.y +
+        w * local.z
+    );
+
+    float solidAngle = 2.0 * PI * (1.0 - cosThetaMax);
+    pdf = 1.0 / solidAngle;
+}
+
+bool is_ray_occluded(vec3 pos, vec3 dir) {
+    HitInfo hitinfo = dda(Ray(pos, dir));
+    return hitinfo.hit;
+}
+
 /*
     Path-trace a single ray and gather radiance information.
 */
-vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
+vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
     vec3 radiance = vec3(0.0); // Final ray color
     vec3 radiance_delta = vec3(1.0); // Accumulated multiplier
 
-    for (int bounce = 0; bounce < u_bounces; bounce++) {
+    for (total_bounces = 0; total_bounces < u_bounces; total_bounces++) {
 
-        HitInfo hitinfo = dda(ray);
+        HitInfo hitinfo;
+
+        /* This is only for material preview, will probably be removed. */
+        if (u_exp_raymarch != 0) {
+            hitinfo = raymarch(ray);
+        }
+        else {
+            hitinfo = dda(ray);
+        }
 
         /*
             In temporal reprojection use the first valid ray as the primary ray.
             TODO: Can this be improved? Maybe average all bounces together?
         */
-        if (bounce == 0) {
+        if (total_bounces == 0) {
             primary_hit = hitinfo;
         }
 
-        // Ray did not hit anything, sample sky
+        /* Ray did not hit anything, sample sky. */
+
         if (!hitinfo.hit) {
-            vec3 sky_color;
-
-            if (u_enable_sky_texture) {
-                sky_color = texture(s_sky, uv_project_sphere(ray.dir)).rgb;
-
-                // Sky texture is already tonemapped
-                sky_color = pow(sky_color, vec3(2.2));
+            float angle_to_sun = acos(dot(ray.dir, u_sun_direction));
+            if (angle_to_sun < u_sun_angular_radius) {
+                radiance += u_sun_radiance * radiance_delta;
+                break;
             }
             else {
-                sky_color = u_sky_color;
-            }
+                vec3 sky_color;
+                if (u_enable_sky_texture) {
+                    sky_color = texture(s_sky, uv_project_sphere(ray.dir)).rgb;
 
-            radiance += sky_color * radiance_delta;
-            break;
+                    // Sky texture is already tonemapped
+                    // sky_color = pow(sky_color, vec3(2.2));
+                }
+                else {
+                    sky_color = u_sky_color;
+                }
+
+                radiance += sky_color * radiance_delta;
+                break;
+            }
         }
+
+        vec3 N = normalize(hitinfo.normal);
+        vec3 V = normalize(-ray.dir);
+
+        /******************************
+
+            Prepare surface material
+
+         ******************************/
 
         /*
             0 -> Top
@@ -562,7 +762,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
         else surface_id = 2.0;
 
         float atlas_w = 1.0 / 3.0;
-        float atlas_h = 1.0 / 7.0; // TODO: Pass block row count as uniform (or pass 1/h)
+        float atlas_h = 1.0 / 8.0; // TODO: Pass block row count as uniform (or pass 1/h)
 
         vec2 atlas_uv = hitinfo.face_uv;
         atlas_uv.x = atlas_uv.x * atlas_w + float(surface_id) * atlas_w;
@@ -570,7 +770,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
 
         vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
         vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * EMISSIVE_MULT;
-        float metallic  = texture(s_metallic_atlas, atlas_uv).r;
+        float metallic = texture(s_metallic_atlas, atlas_uv).r;
         float roughness = texture(s_roughness_atlas, atlas_uv).r;
 
         Material material = Material(
@@ -581,19 +781,60 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
             DIELECTRIC_BASE_REFLECTANCE
         );
 
-        vec3 N = normalize(hitinfo.normal);
-        vec3 V = normalize(-ray.dir);
+        if (u_exp_raymarch != 0) {
+            material = u_exp_material;
+        }
+
+        /******************************
+
+           NEE (Next Event Estimation)
+
+         ******************************/
+
+        if (u_enable_nee) {
+            // TODO: Is this the best bethod to sample sun?
+            vec3 sun_world_dir;
+            float sun_pdf;
+            sample_sun_cone(
+                u_sun_direction,
+                u_sun_angular_radius,
+                sun_world_dir,
+                sun_pdf
+            );
+
+            if (!is_ray_occluded(hitinfo.point + N * EPSILON, sun_world_dir)) {
+                float NoL = max(dot(N, sun_world_dir), 0.0);
+
+                BRDFState state = prepare_brdf(material);
+                vec3 H = normalize(V + sun_world_dir);
+
+                vec3 nee_brdf = vec3(0.0);
+                float nee_pdf = 0.0; // Not used in NEE, light's PDF is used instead 
+                if (state.lobe < state.diffuse_weight) {
+                    nee_brdf = diffuse_brdf(V, N, sun_world_dir, state, nee_pdf);
+                }
+                else {
+                    nee_brdf = specular_brdf(V, N, sun_world_dir, H, state, nee_pdf);
+                }
+
+                radiance += radiance_delta * nee_brdf * vec3(u_sun_radiance) * NoL / sun_pdf;
+            }
+        }
+
+        /******************************
+
+            Indirect lighting (BRDF)
+
+         ******************************/
+
         vec3 L;
         float pdf;
         vec3 brdf = sample_brdf(N, V, material, L, pdf);
 
-        ray = Ray(hitinfo.point + N * EPSILON, L);
-
         // Current surface emission
-        float simple_luma = (material.emissive.r + material.emissive.g + material.emissive.b);
-        if (simple_luma > 0.0) {
+        if (length(material.emissive) > 0.0) {
             radiance += material.emissive * radiance_delta;
-            break;
+            // TODO: to break; or not break; ?
         }
 
         // Absorption
@@ -602,8 +843,11 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit) {
             radiance_delta *= brdf / pdf;
         }
 
+        // Spawn new ray from the BRDF reflection
+        ray = Ray(hitinfo.point + N * EPSILON, L);
+
         /*
-            TODO: Adjust to new BRDF.
+            TODO: Adjust to new BRDF & NEE.
             Russian Roulette:
             As the throughput gets smaller, the ray is more likely to get terminated early.
             Survivors have their value boosted to make up for fewer samples being in the average.
@@ -641,11 +885,13 @@ void main() {
     // Primary hit information in the last sample
     HitInfo primary_hit;
 
+    int total_bounces = 0;
+
     float u_ray_countf = float(u_ray_count);
     for (int sample_i = 0; sample_i < u_ray_count; sample_i++) {
 
         // Initialize PRNGs
-        int temporal_frame_i = accumulations[pixel.x + pixel.y * 1920];
+        int temporal_frame_i = accumulations[pixel.x + pixel.y * int(u_resolution.x)];
         prng_seed(pixel, sample_i, temporal_frame_i);
         heitz_seed(pixel, sample_i, temporal_frame_i);
 
@@ -669,10 +915,15 @@ void main() {
 
         Ray ray = generate_ray(ray_pos);
 
-        vec3 radiance = pathtrace(ray, primary_hit);
+        int sample_bounces = 0;
+        vec3 radiance = pathtrace(ray, primary_hit, sample_bounces);
 
         final_radiance += radiance / u_ray_countf;
+        total_bounces += sample_bounces;
     }
+
+    float normalized_bounces = (float(total_bounces) / float(u_ray_count) / float(u_bounces));
+    f_bounces = vec4(vec3(normalized_bounces), 1.0);
 
     vec3 final_color = final_radiance;
 
@@ -729,24 +980,24 @@ void main() {
                 vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
 
                 // Temporal blending weight
-                int acc = accumulations[pixel.x + pixel.y * 1920];
+                int acc = accumulations[pixel.x + pixel.y * int(u_resolution.x)];
                 float capped_frame = min(float(acc), max_accumulation_frames);
                 float weight = 1.0 / (capped_frame + 1.0);
 
                 // Blend current and reprojected colors
                 final_color = mix(previous_color, final_color, weight);
 
-                accumulations[pixel.x + pixel.y * 1920] += 1;
+                accumulations[pixel.x + pixel.y * int(u_resolution.x)] += 1;
             }
             else {
                 final_color = final_color;
-                accumulations[pixel.x + pixel.y * 1920] = 0;
+                accumulations[pixel.x + pixel.y * int(u_resolution.x)] = 0;
             }
         }
         else {
             // No valid history reset accumulation
             final_color = final_color;
-            accumulations[pixel.x + pixel.y * 1920] = 0;
+            accumulations[pixel.x + pixel.y * int(u_resolution.x)] = 0;
         }
     }
 
