@@ -1,7 +1,7 @@
 # voxel-pathtracer
 A work-in-progress real-time voxel path tracer implementing physically-based rendering.
 
-<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/cornell.jpg" width=400>
+<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/gallery/small_thumbnail.jpg" width=400>
 
 
 
@@ -13,7 +13,8 @@ A work-in-progress real-time voxel path tracer implementing physically-based ren
 
 - **Sampling & Image Stability**
   - Low-discrepancy blue noise sampling
-  - Temporal accumulation with reprojection for noise reduction
+  - Temporal accumulation with reprojection
+  - Next Event Estimation (NEE) for explicit sun sampling
   - Multiple anti-aliasing methods like FXAA and subpixel jitter
 
 - **Physically-Based Materials**
@@ -30,6 +31,7 @@ A work-in-progress real-time voxel path tracer implementing physically-based ren
 - **Environment**
   - Skydome texture as evironment map
   - Emissive materials as light sources
+  - Custom sun
 
 ### Roadmap
 - Procuderal sky generation
@@ -39,8 +41,7 @@ A work-in-progress real-time voxel path tracer implementing physically-based ren
 - Transparent objects & transmission (Disney BSDF?)
 - Volumetrics
 - Denoising
-- Next event estimation (NEE)
-- Multiple importance sampling (MIS)
+- Multiple importance sampling (MIS) with NEE
 
 
 
@@ -55,10 +56,23 @@ $ python main.py
 ```
 
 
+# Gallery
+<details>
+<summary>Click here to see images (loading may take a second)</summary>
+
+<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/gallery/cornell_box.png">
+
+<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/gallery/couch.png">
+
+</details>
+<br>
+
+
 # Resources & References
 - E. Heitz et al, [A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space](https://eheitzresearch.wordpress.com/762-2/)
 - M. Pharr, W. Jakob, and G. Humphreys, ["Physically Based Rendering" book](https://www.pbr-book.org/4ed/contents)
 - P. Shirley, T. Black, S. Hollasch, ["Ray Tracing in One Weekend" book series](https://raytracing.github.io/)
+- TU Wien, [2021 Rendering Lectures](https://www.youtube.com/watch?v=FU1dbi827LY&list=PLmIqTlJ6KsE2yXzeq02hqCDpOdtj6n6A9&index=10)
 - Brian Karis, [Real Shading in Unreal Engine 4](https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf)
 - Brent Burley, [Physically Based Shading at Disney](https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf)
 - R. Guy, M. Agopian, [Physically Based Rendering in Filament](https://google.github.io/filament/Filament.md.html)
