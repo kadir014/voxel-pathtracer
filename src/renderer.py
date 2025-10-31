@@ -82,8 +82,8 @@ class RendererSettings:
 
         self.collect_information = False
 
-        self.sun_yaw = 0.0
-        self.sun_pitch = 30.0
+        self.sun_azimuth = 0.0
+        self.sun_altitude = 30.0
 
     @property
     def postprocessing(self) -> bool:
@@ -223,14 +223,6 @@ class RendererSettings:
         self.__renderer._pt_program["u_enable_sky_texture"].value = value
 
     @property
-    def sky_color(self) -> tuple[float, float, float]:
-        return self.__renderer._pt_program["u_sky_color"].value
-    
-    @sky_color.setter
-    def sky_color(self, value: tuple[float, float, float]) -> None:
-        self.__renderer._pt_program["u_sky_color"].value = value
-
-    @property
     def enable_accumulation(self) -> bool:
         return self.__renderer._pt_program["u_enable_accumulation"].value
     
@@ -248,6 +240,14 @@ class RendererSettings:
     @antialiasing.setter
     def antialiasing(self, value: int) -> None:
         self.__renderer._pt_program["u_antialiasing"].value = value
+
+    @property
+    def sky_turbidity(self) -> float:
+        return self.__renderer._pt_program["u_turbidity"].value
+    
+    @sky_turbidity.setter
+    def sky_turbidity(self, value: float) -> None:
+        self.__renderer._pt_program["u_turbidity"].value = value
 
     @property
     def sun_radiance(self) -> tuple[float, float, float]:
@@ -466,14 +466,14 @@ class Renderer:
         self._pt_program["u_bounces"] = 3
         self._pt_program["u_noise_method"] = 1
         self._pt_program["u_enable_roulette"] = False
-        self._pt_program["u_enable_sky_texture"] = True
+        self._pt_program["u_enable_sky_texture"] = False
         self._pt_program["u_enable_nee"] = True
-        self._pt_program["u_sky_color"] = (0.0, 0.0, 0.0)
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = shared.world.voxel_size
         self._pt_program["u_enable_accumulation"] = True
         self._pt_program["u_antialiasing"] = 1
         self._pt_program["u_exp_raymarch"] = 0
+        self._pt_program["u_turbidity"] = 2.0
         self._pt_program["u_sun_direction"] = pygame.Vector3(0.0, 1.0, 1.0).normalize()
         self._pt_program["u_sun_radiance"] = (1500.0, 1500.0, 1500.0)
         self._pt_program["u_sun_angular_radius"] = 0.0275
@@ -609,7 +609,7 @@ class Renderer:
         self.write_heinz_data()
 
 
-        sky_surf = pygame.image.load("data/sky/qwantani_dusk_2_puresky.png")
+        sky_surf = pygame.image.load("data/sky/voortrekker_interior.png")
         self._sky_texture = self._context.texture(
             sky_surf.get_size(),
             3,
@@ -1108,9 +1108,12 @@ class Renderer:
         """
 
         # Build sun direction from spherical coords
+        # Altitude is the same as "pitch"
+        # Azimuth is the horizontal angle of the sun measured clockwise from North
+        # it's also almost the same as "yaw"
 
-        pitch_r = radians(self.settings.sun_pitch)
-        yaw_r = radians(self.settings.sun_yaw)
+        pitch_r = radians(self.settings.sun_altitude)
+        yaw_r = radians(self.settings.sun_azimuth)
         pitch_c = cos(pitch_r)
         pitch_s = sin(pitch_r)
         yaw_c = cos(yaw_r)
@@ -1120,9 +1123,9 @@ class Renderer:
             yaw_c * pitch_c,
             pitch_s,
             yaw_s * pitch_c
-        )
+        ).normalize()
 
-        self._pt_program["u_sun_direction"] = (sun_dir.x, sun_dir.y, sun_dir.z)
+        self._pt_program["u_sun_direction"] = tuple(sun_dir)
 
         self._context.disable(moderngl.BLEND)
 

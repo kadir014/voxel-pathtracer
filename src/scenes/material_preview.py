@@ -167,12 +167,12 @@ class MaterialPreview(Scene):
             imgui.tree_pop()
 
         if imgui.tree_node("Sky", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-            _, renderer.settings.enable_sky_texture = imgui.checkbox("Enable sky texture", renderer.settings.enable_sky_texture)
-            _, renderer.settings.sky_color = imgui.color_edit3("Sky color", *renderer.settings.sky_color, imgui.COLOR_EDIT_NO_INPUTS)
+            _, renderer.settings.sky_turbidity = imgui.slider_float(f"Sky turbidity", renderer.settings.sky_turbidity, 2.0, 10.0)
+            _, renderer.settings.sun_angular_radius = imgui.slider_float(f"Sun angular radius", renderer.settings.sun_angular_radius, 0.0, pi * 0.05)
+            _, renderer.settings.sun_azimuth = imgui.slider_float(f"Sun azimuth", renderer.settings.sun_azimuth, 0.0, 360.0)
+            _, renderer.settings.sun_altitude = imgui.slider_float(f"Sun altitude", renderer.settings.sun_altitude, 0.0, 90.0)
 
-            _, renderer.settings.sun_angular_radius = imgui.slider_float(f"Sun angular radius", renderer.settings.sun_angular_radius, 0.0, pi)
-            _, renderer.settings.sun_yaw = imgui.slider_float(f"Sun yaw", renderer.settings.sun_yaw, 0.0, 360.0)
-            _, renderer.settings.sun_pitch = imgui.slider_float(f"Sun pitch", renderer.settings.sun_pitch, -90.0, 90.0)
+            _, renderer.settings.enable_sky_texture = imgui.checkbox("Use sky texture", renderer.settings.enable_sky_texture)
 
             imgui.tree_pop()
 

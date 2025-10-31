@@ -19,6 +19,7 @@
 
 #include "common.glsl"
 #include "microfacet.glsl"
+#include "preetham.glsl"
 
 
 #define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
@@ -39,13 +40,13 @@ uniform float u_voxel_size;
 uniform bool u_enable_roulette;
 uniform bool u_enable_sky_texture;
 uniform bool u_enable_nee;
-uniform vec3 u_sky_color;
 uniform bool u_enable_accumulation;
 uniform int u_antialiasing;
 uniform int u_exp_raymarch;
 uniform vec3 u_sun_direction;
 uniform vec3 u_sun_radiance;
 uniform float u_sun_angular_radius;
+uniform float u_turbidity;
 
 uniform sampler3D s_grid;
 uniform sampler2D s_sky;
@@ -671,9 +672,10 @@ void sample_sun_cone(
     }
 
     float cos_theta_max = cos(sun_angular_radius);
-    float cos_theta = 1.0 - r0 * (1.0 - cos_theta_max);
-    float sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
-    float phi = 2.0 * PI * r1;
+    //float cos_theta = (1.0 - r0) + r0 * cos_theta_max;;
+    float cos_theta = mix(cos_theta_max, 1.0, r0);
+    float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+    float phi = TAU * r1;
 
     // Spherical
     vec3 local = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
@@ -749,7 +751,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
                     // sky_color = pow(sky_color, vec3(2.2));
                 }
                 else {
-                    sky_color = u_sky_color;
+                    sky_color = preetham_sky(u_sun_direction, ray.dir, u_turbidity) * 0.052;
                 }
 
                 radiance += sky_color * radiance_delta;

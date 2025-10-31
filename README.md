@@ -29,14 +29,12 @@ A work-in-progress real-time voxel path tracer implementing physically-based ren
   - Upsampling
 
 - **Environment**
-  - Skydome texture as evironment map
+  - Analytical Preetham sky model with sun disk
+  - Custom skydome texture
   - Emissive materials as light sources
-  - Custom sun
 
 ### Roadmap
-- Procuderal sky generation
-  - Somewhat physically correct atmosphere model
-  - Volumetric clouds (realistic & stylistic)
+- Volumetric clouds (realistic & stylistic)
 - Octree acceleration for world traversal
 - Transparent objects & transmission (Disney BSDF?)
 - Volumetrics
@@ -75,6 +73,7 @@ $ python main.py
 - TU Wien, [2021 Rendering Lectures](https://www.youtube.com/watch?v=FU1dbi827LY&list=PLmIqTlJ6KsE2yXzeq02hqCDpOdtj6n6A9&index=10)
 - Brian Karis, [Real Shading in Unreal Engine 4](https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf)
 - Brent Burley, [Physically Based Shading at Disney](https://media.disneyanimation.com/uploads/production/publication_asset/48/asset/s2012_pbs_disney_brdf_notes_v3.pdf)
+- A. J. Preetham et al, [A Practical Analytic Model for Daylight](https://courses.cs.duke.edu/cps124/spring08/assign/07_papers/p91-preetham.pdf)
 - R. Guy, M. Agopian, [Physically Based Rendering in Filament](https://google.github.io/filament/Filament.md.html)
 - Marco Alamia, [Physically Based Rendering - Cook-Torrance](http://www.codinglabs.net/article_physically_based_rendering_cook_torrance.aspx)
 - Jacco Bikker, [Reprojection in a Ray Tracer](https://jacco.ompf2.com/2024/01/18/reprojection-in-a-ray-tracer/)
