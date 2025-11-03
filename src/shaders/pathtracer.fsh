@@ -1,10 +1,10 @@
 /*
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 */
 
@@ -52,8 +52,9 @@ uniform sampler3D s_grid;
 uniform sampler2D s_sky;
 uniform sampler2D s_albedo_atlas;
 uniform sampler2D s_emissive_atlas;
-uniform sampler2D s_metallic_atlas;
 uniform sampler2D s_roughness_atlas;
+uniform sampler2D s_metallic_atlas;
+uniform sampler2D s_glass_atlas;
 uniform sampler2D s_previous_frame;
 uniform sampler2D s_previous_normal;
 
@@ -79,6 +80,7 @@ uniform Camera u_camera;
 uniform Camera u_prev_camera;
 
 
+vec3 issue_color;
 bool issue;
 
 
@@ -92,17 +94,47 @@ struct HitInfo {
     bool hit; // Collision with ray happened?
     vec3 point; // Collision point on the surface in world space
     vec3 normal; // Normal of the collision surface
+    bool inside; // Started inside the medium?
     int block_id; // ID of the block type
     vec2 face_uv; // Local UV coordinate on the hit face
 };
 
-// Physically-based surface material
+/*
+    Physically-based surface material
+
+    albedo
+        Base color. If it's a texture map, it should have minimal or preferably
+        no shadows because that should be added with an AO map later.
+        In range [0, 1].
+    emissive
+        Emission color.
+        In range [0, infinity].
+    metallic
+        Metallness. 0 = Dielectric, 1 = Metallic (conductor).
+        Values in between are interpolated, so it doesn't really make
+        sense to not have binary values.
+        In range [0, 1].
+    roughness
+        Perceptual microfacet roughness for specular reflection and transmission.
+        In range [0, 1].
+    reflectance
+        Base specular reflectance (f0).
+        In range [0, 1].
+    glass
+        Transmission weight. 0 = Opaque, 1 = Fully transmissive.
+        In range [0, 1].
+    ior
+        Index of Refraction. Air has an IOR of 1.0.
+        In range [1, infinity].
+*/
 struct Material {
-    vec3 albedo; // Base color (should have minimal or no shadows) [0, 1] 
-    vec3 emissive; // Emission color [0, infinity]
-    float metallic; // 0 = Dielectric 1 = Metallic
-    float roughness; // Perceptual roughness [0, 1]
-    float reflectance; // Base reflectance (F0) [0, 1] 
+    vec3 albedo;
+    vec3 emissive;
+    float metallic;
+    float roughness;
+    float reflectance;
+    float glass;
+    float ior;
 };
 
 // Material preview feature only, will be removed
@@ -114,6 +146,7 @@ HitInfo dda(Ray ray) {
         false,
         vec3(0.0),
         vec3(0.0),
+        false,
         0,
         vec2(0.0)
     );
@@ -122,6 +155,9 @@ HitInfo dda(Ray ray) {
     voxel.x = floor(voxel.x);
     voxel.y = floor(voxel.y);
     voxel.z = floor(voxel.z);
+
+    vec4 first_sample = texelFetch(s_grid, ivec3(voxel), 0);
+    hitinfo.inside = first_sample.r > 0.0;
 
     vec3 step_dir = vec3(
         int(ray.dir.x > 0) - int(ray.dir.x < 0),
@@ -183,12 +219,24 @@ HitInfo dda(Ray ray) {
         }
 
         vec4 voxel_sample = texelFetch(s_grid, ivec3(voxel), 0);
-        if (voxel_sample.r > 0.0) {
+
+        // Connected voxels
+        // Useful for glass
+        if (voxel_sample.r == first_sample.r) continue;
+
+        if (hitinfo.inside || voxel_sample.r > 0.0) {
             hitinfo.hit = true;
 
             hitinfo.point = ray.origin + ray.dir * hit_t;
 
-            hitinfo.block_id = int(voxel_sample.r * 255.0);
+            //if (hitinfo.inside) hitinfo.normal = -hitinfo.normal;
+
+            if (hitinfo.inside) {
+                hitinfo.block_id = int(first_sample.r * 255.0);
+            }
+            else {
+                hitinfo.block_id = int(voxel_sample.r * 255.0);
+            }
 
             // WHY DID DIVIDING BY VOXEL SIZE WORK
             vec3 local = fract(hitinfo.point / u_voxel_size);
@@ -229,9 +277,9 @@ float sdf_round_box(vec3 p, vec3 center, vec3 b, float r) {
 float sdf(vec3 pos) {
    //return min(sdf_sphere(pos, vec3(0.0), 1.5), sdf_box(pos, vec3(0.0), vec3(1.0)));
 
-   return sdf_sphere(pos, vec3(0.0), 1.0);
+   //return sdf_sphere(pos, vec3(0.0), 1.0);
    //return sdf_round_box(pos, vec3(0.0), vec3(1.0), 0.5);
-   //return sdf_box(pos, vec3(0.0), vec3(1.0));
+   return sdf_box(pos, vec3(0.0), vec3(1.0));
 }
 
 vec3 estimate_normal(vec3 p) {
@@ -243,33 +291,38 @@ vec3 estimate_normal(vec3 p) {
 }
 
 HitInfo raymarch(Ray ray) {
-    HitInfo hitinfo = HitInfo(
-        false,
-        vec3(0.0),
-        vec3(0.0),
-        0,
-        vec2(0.0)
-    );
-
     vec3 curr_pos = ray.origin;
+    bool inside = sdf(curr_pos) < 0.0;
 
     for (int i = 0; i < 100; i++) {
     	float dist = sdf(curr_pos);
 
-        if (dist < EPSILON) {
+        if (abs(dist) < EPSILON) {
+            vec3 normal = estimate_normal(curr_pos);
+
+            if (inside) normal = -normal;
+
             return HitInfo(
                 true,
                 curr_pos,
-                estimate_normal(curr_pos),
+                normal,
+                inside,
                 0,
                 vec2(0.0, 0.0)
             );
         }
 
-        curr_pos += ray.dir * dist;
+        curr_pos += ray.dir * abs(dist);
     }
 
-    return hitinfo;
+    return HitInfo(
+        false,
+        vec3(0.0),
+        vec3(0.0),
+        false,
+        0,
+        vec2(0.0)
+    );
 }
 
 
@@ -405,22 +458,27 @@ vec3 random_in_unit_sphere() {
 }
 
 
-struct BRDFState {
+struct BSDFState {
     vec3 albedo;
     float metallic;
     float roughness;
     vec3 f0;
+    float ior;
     float diffuse_weight;
     float specular_weight;
+    float transmit_weight;
     float lobe;
 };
 
 /*
-    Prepare material properties and lobe weights for sampling BRDFs.
+    Prepare material properties and lobe weights for sampling the BSDF.
 */
-BRDFState prepare_brdf(Material material) {
-    vec3 albedo = material.albedo;
+BSDFState prepare_bsdf(Material material) {
+    // Albedo over 1.0 can result in emissive-like behavior, but I'm not sure if this is accurate
+    vec3 albedo = clamp(material.albedo, 0.0, 1.0);
     float metallic = clamp(material.metallic, 0.0, 1.0);
+    float transmission = clamp(material.glass, 0.0, 1.0);
+    float ior = max(material.ior, 1.0);
 
     // Perceptual roughness -> linear material roughness
     // Often called alpha in BRDF equations
@@ -435,16 +493,20 @@ BRDFState prepare_brdf(Material material) {
     vec3 f0 = mix(vec3(reflectance), albedo, metallic);
 
     // Diffuse reflectance weight
-    float diffuse_weight = 1.0 - metallic;
+    float diffuse_weight = (1.0 - metallic) * (1.0 - transmission);
 
     // Specular reflectance weight
     // Use average Fresnel at normal incidence (perceived weights)
     float specular_weight = luminance(f0);
 
-    // Adjust weights so they sum up to 1.0
-    float inv_weight = 1.0 / (diffuse_weight + specular_weight);
+    // Specular refraction weight
+    float transmit_weight = transmission * (1.0 - metallic);
+
+    // Normalize weights so they sum up to 1.0
+    float inv_weight = 1.0 / (diffuse_weight + specular_weight + transmit_weight);
     diffuse_weight *= inv_weight;
     specular_weight *= inv_weight;
+    transmit_weight *= inv_weight;
 
     float lobe = 0.0;
     if (u_noise_method == NOISE_METHOD_PRNG) {
@@ -454,13 +516,15 @@ BRDFState prepare_brdf(Material material) {
         lobe = heitz_sample();
     }
 
-    return BRDFState(
+    return BSDFState(
         albedo,
         metallic,
         roughness,
         f0,
+        ior,
         diffuse_weight,
         specular_weight,
+        transmit_weight,
         lobe
     );
 }
@@ -469,7 +533,7 @@ vec3 diffuse_brdf(
     vec3 V,
     vec3 N,
     vec3 L,
-    BRDFState state,
+    BSDFState state,
     out float pdf
 ) {
     /*
@@ -501,7 +565,7 @@ vec3 specular_brdf(
     vec3 N,
     vec3 L,
     vec3 H,
-    BRDFState state,
+    BSDFState state,
     out float pdf
 ) {
     /*
@@ -546,34 +610,112 @@ vec3 specular_brdf(
     return brdf;
 }
 
+vec3 specular_btdf(
+    vec3 V,
+    vec3 N,
+    vec3 L,
+    vec3 H,
+    bool inside,
+    BSDFState state,
+    out float pdf
+) {
+    /*
+        Sample specular BTDF
+
+        B. Walter et al. Rough refraction microfacet model:
+        ---------------------------------------------------
+        D -> Normal distribution function
+        F -> Fresnel term
+        G -> Shadowing-masking function
+        ni -> Incident IOR
+        no -> Material IOR
+
+        f = ((VoH * LoH) / (NoV * NoL)) * ((no^2 * (1-F) * G * D) / (ni*VoH + no*LoH)^2)
+        pdf = ???
+    */
+
+    float ni = AIR_IOR;
+    float no = state.ior;
+
+    if (inside) {
+        ni = state.ior;
+        no = AIR_IOR;
+    }
+
+    float eta = ni / no;
+
+    float NoV = dot(N, V);
+    float NoL = dot(N, L);
+    float NoH = dot(N, H);
+    float VoH  = dot(V, H);
+    float LoH  = dot(L, H);
+
+    // TODO: Do tests on which ones to clamp and test for NaNs
+
+    if (NoV <= 0.0 || NoL <= 0.0) {
+        pdf = 0.0;
+        return vec3(0.0);
+    }
+
+    // NoL = clamp(NoL, 0.0, 1.0);
+    // NoV = clamp(NoV, 0.0, 1.0);
+    // NoH = clamp(NoH, 0.0, 1.0);
+    // VoH = clamp(VoH, 0.0, 1.0);
+    // LoH = clamp(LoH, 0.0, 1.0);
+
+    // NoH = min(0.99, NoH);
+
+    float D = D_GGX(NoH, state.roughness);
+    float G = G_Smith(NoV, NoL, state.roughness);
+    vec3 F = F_Schlick(state.f0, VoH);
+
+    // (ni*VoH + no*LoH)^2 part of the BTDF
+    float denom = (ni * VoH + no * LoH);
+    denom = denom * denom;
+
+    //vec3 btdf = ((VoH * LoH) / (NoV * NoL)) * ((no*no * (1.0 - F) * G * D) / denom);
+
+    //vec3 btdf = abs(VoH * LoH) * D * G * (vec3(1.0) - F);
+    //btdf *= (no * no) / max(denom, 1e-8);
+    //btdf /= max(NoV * NoL, 1e-8); // /(|n⋅v| |n⋅l|)
+
+    float jacobian = abs(LoH) / denom;
+
+    vec3 abso = pow(state.albedo, vec3(0.5));
+    vec3 btdf = abso * D * G * (1.0 - F) * abs(VoH) * jacobian * pow(eta, 2.0) / abs(NoL * NoV);
+
+    // ? pdf = D * NoH * abs(LoH) / denom;
+
+    pdf = G1_SchlickGGX(abs(NoL), state.roughness) * max(0.0, VoH) * D * jacobian / NoV;
+
+    return btdf * NoL;
+}
+
 /*
-    My physically-based material BRDF.
-    Heavily inspired by UE4's sampler showcased in Brian Karis' paper.
+    My physically-based BSDF (Bidirectional Scattering Distribution Function)
 
-    Uses a "metalness" workflow.
-    Lambertian BRDF for diffuse and Cook-Torrance microfacet model for specular.
+    BRDF is based on UE4's model in Brian Karis' paper.
+    BTDF is based on B. Walter et al. paper.
 
+    V        -> View direction (incoming ray)
     N        -> Surface normal
-    V        -> View direction
     material -> Surface material
     L        -> Reflected ray direction
     pdf      -> PDF of the sampled BRDF
     return   -> Sampled radiance (multiplied by NoL)
 */
-vec3 sample_brdf(
-    vec3 N,
+vec3 sample_bsdf(
     vec3 V,
+    inout vec3 N,
+    bool inside,
     Material material,
     out vec3 L,
     out float pdf
 ) {
-    /*
-        1. Choose which reflectance to sample (diffuse or specular)
-        2. Calculate L (reflected ray direction)
-        3. Sample weighted BRDFs
-    */
+    BSDFState state = prepare_bsdf(material);
 
-    BRDFState state = prepare_brdf(material);
+    L = vec3(0.0);
+    pdf = 0.0;
 
     // Sample diffuse BRDF
     if (state.lobe < state.diffuse_weight) {
@@ -582,7 +724,8 @@ vec3 sample_brdf(
 
         return diffuse_brdf(V, N, L, state, pdf);
     }
-    // Sample specular BRDF
+
+    // Specular event (reflection or refraction)
     else {
         vec2 xi = vec2(0.0);
         if (u_noise_method == NOISE_METHOD_PRNG) {
@@ -595,13 +738,36 @@ vec3 sample_brdf(
         }
 
         vec3 H = GGX_importance_sample(xi, state.roughness, N);
-        L = 2.0 * dot(V, H) * H - V;
+        float VoH = dot(V, H);
 
-        return specular_brdf(V, N, L, H, state, pdf);
+        // Sample specular BRDF
+        if (state.lobe < state.diffuse_weight + state.specular_weight) {
+            L = 2.0 * VoH * H - V;
+
+            return specular_brdf(V, N, L, H, state, pdf);
+        }
+
+        // Sample specular BTDF
+        else if (state.transmit_weight > 0.0) {
+            float eta = inside ? state.ior / AIR_IOR : AIR_IOR / state.ior;
+
+            // TODO: Handle total internal reflection (L=vec3(0))
+            L = refract(-V, H, eta);
+
+            if (L == vec3(0.0)) {
+                pdf = 0.0;
+                return vec3(0.0);
+            }
+
+            vec3 btdf = specular_btdf(V, N, L, H, inside, state, pdf);
+
+            // Use the inverse lobe when spawning the next ray
+            N = -N;
+
+            return btdf;
+        }
     }
 
-    L = vec3(0.0);
-    pdf = 0.0;
     return vec3(0.0);
 }
 
@@ -696,6 +862,41 @@ void sample_sun_cone(
     pdf = 1.0 / solid_angle;
 }
 
+Material material_from_hitinfo(HitInfo hitinfo) {
+    /*
+        0 -> Top
+        1 -> Bottom
+        2 -> Side
+    */
+    float surface_id = 0.0;
+    if (hitinfo.normal.y > 0.0) surface_id = 0.0;
+    else if (hitinfo.normal.y < 0.0) surface_id = 1.0;
+    else surface_id = 2.0;
+
+    float atlas_w = 1.0 / 3.0;
+    float atlas_h = 1.0 / 9.0; // TODO: Pass block row count as uniform (or pass 1/h)
+
+    vec2 atlas_uv = hitinfo.face_uv;
+    atlas_uv.x = atlas_uv.x * atlas_w + float(surface_id) * atlas_w;
+    atlas_uv.y = atlas_uv.y * atlas_h + float(hitinfo.block_id - 1) * atlas_h;
+
+    vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
+    vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * EMISSIVE_MULT;
+    float roughness = texture(s_roughness_atlas, atlas_uv).r;
+    float metallic = texture(s_metallic_atlas, atlas_uv).r;
+    float glass = texture(s_glass_atlas, atlas_uv).r;
+
+    return Material(
+        albedo,
+        emissive,
+        metallic,
+        roughness,
+        DIELECTRIC_BASE_REFLECTANCE,
+        glass,
+        1.5
+    );
+}
+
 bool is_ray_occluded(vec3 pos, vec3 dir) {
     HitInfo hitinfo = dda(Ray(pos, dir));
     return hitinfo.hit;
@@ -708,7 +909,16 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
     vec3 radiance = vec3(0.0); // Final ray color
     vec3 radiance_delta = vec3(1.0); // Accumulated multiplier
 
+    // If we encounter a glass, disable this
+    bool allow_nee = u_enable_nee;
+
     for (total_bounces = 0; total_bounces < u_bounces; total_bounces++) {
+
+        /******************************
+
+                 Trace the ray
+
+         ******************************/
 
         HitInfo hitinfo;
 
@@ -728,7 +938,11 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
             primary_hit = hitinfo;
         }
 
-        // Ray did not hit anything, sample sky
+        /******************************
+
+              Environment sampling
+
+         ******************************/
         if (!hitinfo.hit) {
             float cos_angle = dot(ray.dir, u_sun_direction);
             float cos_theta_max = cos(u_sun_angular_radius);
@@ -736,7 +950,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
             // We shouldn't show the sun in the sky to avoid double-counting lights
             // if NEE is enabled, BRDF shouldn't reach the sun.
             bool show_sun = (cos_angle >= cos_theta_max) &&
-                            (!u_enable_nee || total_bounces == 0);
+                            (!allow_nee || total_bounces == 0);
 
             if (show_sun) {
                 radiance += u_sun_radiance * radiance_delta;
@@ -759,44 +973,16 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
             }
         }
 
-        vec3 N = normalize(hitinfo.normal);
-        vec3 V = normalize(-ray.dir);
-
         /******************************
 
             Prepare surface material
 
          ******************************/
 
-        /*
-            0 -> Top
-            1 -> Bottom
-            2 -> Side
-        */
-        float surface_id = 0.0;
-        if (hitinfo.normal.y > 0.0) surface_id = 0.0;
-        else if (hitinfo.normal.y < 0.0) surface_id = 1.0;
-        else surface_id = 2.0;
+        vec3 N = normalize(hitinfo.normal);
+        vec3 V = normalize(-ray.dir);
 
-        float atlas_w = 1.0 / 3.0;
-        float atlas_h = 1.0 / 9.0; // TODO: Pass block row count as uniform (or pass 1/h)
-
-        vec2 atlas_uv = hitinfo.face_uv;
-        atlas_uv.x = atlas_uv.x * atlas_w + float(surface_id) * atlas_w;
-        atlas_uv.y = atlas_uv.y * atlas_h + float(hitinfo.block_id - 1) * atlas_h;
-
-        vec3 albedo = texture(s_albedo_atlas, atlas_uv).rgb;
-        vec3 emissive = texture(s_emissive_atlas, atlas_uv).rgb * EMISSIVE_MULT;
-        float metallic = texture(s_metallic_atlas, atlas_uv).r;
-        float roughness = texture(s_roughness_atlas, atlas_uv).r;
-
-        Material material = Material(
-            albedo,
-            emissive,
-            metallic,
-            roughness,
-            DIELECTRIC_BASE_REFLECTANCE
-        );
+        Material material = material_from_hitinfo(hitinfo);
 
         if (u_exp_raymarch != 0) {
             material = u_exp_material;
@@ -808,7 +994,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
 
          ******************************/
 
-        if (u_enable_nee) {
+        if (allow_nee) {
             // TODO: Is this the best bethod to sample sun?
             vec3 sun_world_dir;
             float sun_pdf;
@@ -822,31 +1008,43 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
             if (!is_ray_occluded(hitinfo.point + N * EPSILON, sun_world_dir)) {
                 float NoL = max(dot(N, sun_world_dir), 0.0);
 
-                BRDFState state = prepare_brdf(material);
+                BSDFState state = prepare_bsdf(material);
                 vec3 H = normalize(V + sun_world_dir);
 
-                vec3 nee_brdf = vec3(0.0);
-                float nee_pdf = 0.0; // Not used in NEE, light's PDF is used instead 
+                vec3 nee_bsdf = vec3(0.0);
+                float nee_pdf = 0.0;
                 if (state.lobe < state.diffuse_weight) {
-                    nee_brdf = diffuse_brdf(V, N, sun_world_dir, state, nee_pdf);
+                    nee_bsdf = diffuse_brdf(V, N, sun_world_dir, state, nee_pdf);
                 }
                 else {
-                    nee_brdf = specular_brdf(V, N, sun_world_dir, H, state, nee_pdf);
+                    float VoH = dot(V, H);
+
+                    vec3 F = F_Schlick(state.f0, VoH);
+                    float F_avg = (luminance(F));
+
+                    if (state.lobe < state.diffuse_weight + state.specular_weight) {
+                        nee_bsdf = specular_brdf(V, N, sun_world_dir, H, state, nee_pdf);
+                    }
+                    else if (state.transmit_weight > 0.0) {
+                        nee_bsdf = specular_btdf(V, N, sun_world_dir, H, hitinfo.inside, state, nee_pdf);
+                    }
                 }
 
-                radiance += radiance_delta * nee_brdf * u_sun_radiance * NoL / sun_pdf;
+                // Brings NaNs
+                if (nee_pdf > 0.0)
+                    radiance += radiance_delta * nee_bsdf * u_sun_radiance * NoL / sun_pdf;
             }
         }
 
         /******************************
 
-            Indirect lighting (BRDF)
+            Indirect lighting (BSDF)
 
          ******************************/
 
         vec3 L;
         float pdf;
-        vec3 brdf = sample_brdf(N, V, material, L, pdf);
+        vec3 bsdf = sample_bsdf(V, N, hitinfo.inside, material, L, pdf);
 
         // Current surface emission
         if (length(material.emissive) > 0.0) {
@@ -856,15 +1054,21 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
 
         // Absorption
         if (pdf > 0.0) {
-            // BRDF is already multiplied by NoL
-            radiance_delta *= brdf / pdf;
+            // BSDF radiance is already multiplied by NoL
+            radiance_delta *= bsdf / pdf;
         }
 
-        // Spawn new ray from the BRDF reflection
-        ray = Ray(hitinfo.point + N * EPSILON, L);
+        // Spawn new ray from the BSDF reflection
+        ray = Ray(hitinfo.point + (N * EPSILON * 50.0), L);
+
+        // If BSDF sampling reached a transmissive surface, disable NEE so
+        // BSDF can reach sky
+        if (material.glass > 0.0) {
+            allow_nee = false;
+        }
 
         /*
-            TODO: Adjust to new BRDF & NEE.
+            TODO: Adjust to new BSDF & NEE.
             Russian Roulette:
             As the throughput gets smaller, the ray is more likely to get terminated early.
             Survivors have their value boosted to make up for fewer samples being in the average.
@@ -895,7 +1099,9 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
 
 void main() {
     vec3 final_radiance = vec3(0.0);
+
     issue = false;
+    issue_color = vec3(1000.0, 0.0, 1000.0);
 
     ivec2 pixel = ivec2(v_uv * u_resolution);
 
@@ -944,6 +1150,9 @@ void main() {
     vec3 final_color = final_radiance;
 
     f_normal = vec4(0.0);
+    if (primary_hit.hit) {
+        f_normal = vec4(primary_hit.normal * 0.5 + 0.5, 1.0);
+    }
 
     float curr_depth = length(primary_hit.point - u_camera.position);
 
@@ -1020,6 +1229,6 @@ void main() {
     f_color = vec4(final_color, luminance(final_color));
 
     if (issue) {
-        f_color = vec4(1000.0, 0.0, 0.0, 1000.0);
+        f_color = vec4(issue_color, 1000.0);
     }
 }

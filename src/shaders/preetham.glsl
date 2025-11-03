@@ -1,10 +1,10 @@
 /*
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 */
 
@@ -17,6 +17,7 @@ precision mediump float;
 #define PREETHAM_H
 
 #include "common.glsl"
+#include "color.glsl"
 
 
 #define PREETHAM_INV_120 0.00833333333333333333333333333333  // 1.0 / 120.0
@@ -45,7 +46,7 @@ vec3 zenith_chromaticity(float T, float theta_s) {
     // Values are given in section A.2
 
 	float chi = (PREETHAM_4_OVER_9 - T * PREETHAM_INV_120) * (PI - 2.0 * theta_s);
-	float Yz = ( 4.0453 * T - 4.9710 ) * tan(chi) - 0.2155 * T + 2.4192;
+	float Yz = (4.0453 * T - 4.9710) * tan(chi) - 0.2155 * T + 2.4192;
 
 	float theta_s2 = theta_s * theta_s;
     float theta_s3 = theta_s2 * theta_s;

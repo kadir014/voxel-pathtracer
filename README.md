@@ -1,14 +1,14 @@
 <br>
 <h1 align="center">Project Lyrae</h1>  
 <p align="center">
-  <a href="https://github.com/kadir014/voxel-pathtracer/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://github.com/kadir014/project-lyrae/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img src="https://img.shields.io/badge/version-0.0.4-yellow">
 </p>
 
 <p align="center">
 A physically-based real-time voxel path traced renderer.
 <br><br>
-<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/gallery/thumb.png" width=550>
+<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/thumb.png" width=550>
 </p>
 
 
@@ -68,9 +68,9 @@ $ python main.py
 <details>
 <summary>Click here to see images (loading may take a second)</summary>
 
-<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/gallery/cornell_box.png">
+<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/cornell_box.png">
 
-<img src="https://raw.githubusercontent.com/kadir014/voxel-pathtracer/refs/heads/main/data/gallery/couch.png">
+<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/couch.png">
 
 </details>
 <br>

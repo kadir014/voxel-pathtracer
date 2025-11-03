@@ -1,10 +1,10 @@
 /*
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 */
 
@@ -18,6 +18,7 @@
 #extension GL_ARB_shading_language_include: enable
 
 #include "common.glsl"
+#include "color.glsl"
 
 
 in vec2 v_uv;
@@ -39,20 +40,6 @@ layout(std430, binding = 1) buffer ExposureLayout {
     float u_adaptation_speed;
     float u_adapted_exposure;
 };
-
-
-/*
-    ACES filmic tone mapping curve
-    https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
-*/
-vec3 aces_filmic(vec3 x) {
-    float a = 2.51;
-    float b = 0.03;
-    float c = 2.43;
-    float d = 0.59;
-    float e = 0.14;
-    return clamp((x*(a*x + b)) / (x*(c*x + d) + e), 0.0, 1.0);
-}
 
 
 void main() {

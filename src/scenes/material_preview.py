@@ -1,10 +1,10 @@
 """
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 """
 
@@ -135,6 +135,8 @@ class MaterialPreview(Scene):
             _, shared.renderer._pt_program["u_exp_material.metallic"] = imgui.slider_float("Metallic", shared.renderer._pt_program["u_exp_material.metallic"].value, 0.0, 1.0, format="%.4f")
             _, shared.renderer._pt_program["u_exp_material.roughness"] = imgui.slider_float("Roughness", shared.renderer._pt_program["u_exp_material.roughness"].value, 0.0, 1.0, format="%.4f")
             _, shared.renderer._pt_program["u_exp_material.reflectance"] = imgui.slider_float("Reflectance (f0)", shared.renderer._pt_program["u_exp_material.reflectance"].value, 0.04, 1.00, format="%.4f")
+            _, shared.renderer._pt_program["u_exp_material.glass"] = imgui.slider_float("Glass", shared.renderer._pt_program["u_exp_material.glass"].value, 0.00, 1.00, format="%.4f")
+            _, shared.renderer._pt_program["u_exp_material.ior"] = imgui.slider_float("IOR", shared.renderer._pt_program["u_exp_material.ior"].value, 1.00, 2.5, format="%.4f")
 
             imgui.tree_pop()
 

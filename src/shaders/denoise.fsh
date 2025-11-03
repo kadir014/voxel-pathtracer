@@ -1,10 +1,10 @@
 /*
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 */
 

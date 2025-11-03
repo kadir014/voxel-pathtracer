@@ -1,10 +1,10 @@
 """
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 """
 
@@ -417,9 +417,11 @@ class Renderer:
 
         self.patcher = ShaderPatcher()
         self.patcher.patch_header("common.glsl", "src/shaders/common.glsl")
+        self.patcher.patch_header("color.glsl", "src/shaders/color.glsl")
         self.patcher.patch_header("microfacet.glsl", "src/shaders/microfacet.glsl")
         self.patcher.patch_header("bicubic.glsl", "src/shaders/bicubic.glsl")
         self.patcher.patch_header("fxaa.glsl", "src/shaders/fxaa.glsl")
+        self.patcher.patch_header("preetham.glsl", "src/shaders/preetham.glsl")
         self.patcher.patch_file("post.fsh", "src/shaders/post.fsh")
         self.patcher.patch_file("upscale.fsh", "src/shaders/upscale.fsh")
         self.patcher.patch_file("pathtracer.fsh", "src/shaders/pathtracer.fsh")
@@ -454,12 +456,13 @@ class Renderer:
             vertex_shader=base_vertex_shader,
             fragment_shader=self.patcher.shaders["pathtracer.fsh"]
         )
-        self._pt_program["s_grid"] = 1
-        self._pt_program["s_sky"] = 2
-        self._pt_program["s_albedo_atlas"] = 3
-        self._pt_program["s_emissive_atlas"] = 4
-        self._pt_program["s_roughness_atlas"] = 5
-        self._pt_program["s_metallic_atlas"] = 6
+        self._pt_program["s_grid"] = 0
+        self._pt_program["s_sky"] = 1
+        self._pt_program["s_albedo_atlas"] = 2
+        self._pt_program["s_emissive_atlas"] = 3
+        self._pt_program["s_roughness_atlas"] = 4
+        self._pt_program["s_metallic_atlas"] = 5
+        self._pt_program["s_glass_atlas"] = 6
         self._pt_program["s_previous_frame"] = 7
         self._pt_program["s_previous_normal"] = 8
         self._pt_program["u_ray_count"] = 8
@@ -696,6 +699,19 @@ class Renderer:
             "copper_block": (100, 100, 100)
         }
 
+        self.glass_atlas = {
+            # top bottom side
+            "cobblestone": (0, 0, 0),
+            "dirt": (0, 0, 0),
+            "glowstone": (0, 0, 0),
+            "grass": (0, 0, 0),
+            "iron_block": (0, 0, 0),
+            "lime_wool": (0, 0, 0),
+            "red_wool": (0, 0, 0),
+            "red_light": (0, 0, 0),
+            "copper_block": (0, 0, 0)
+        }
+
         # Cache scalar surfaces
         for i in range(101):
             s = pygame.Surface(self.block_texture_size)
@@ -707,6 +723,7 @@ class Renderer:
         self.generate_emissive_atlas_texture()
         self.generate_roughness_atlas_texture()
         self.generate_metallic_atlas_texture()
+        self.generate_glass_atlas_texture()
 
 
         self.ui_surface = pygame.Surface(self._resolution, pygame.SRCALPHA)
@@ -1055,6 +1072,54 @@ class Renderer:
                 )
             )
 
+    def generate_glass_atlas_texture(self) -> None:
+        n_blocks = len(self.block_atlas)
+
+        self.glass_atlas_tex = self._context.texture(
+            (self.block_texture_size[0] * 3, self.block_texture_size[1] * n_blocks),
+            3
+        )
+        self.glass_atlas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        print(f"Glass atlas size: {self.glass_atlas_tex.width}x{self.glass_atlas_tex.height}")
+
+        for i, block_variant in enumerate(BLOCK_IDS):
+            if block_variant is None: continue
+
+            top_surf = self.block_textures[self.glass_atlas[block_variant][0]]
+            bottom_surf = self.block_textures[self.glass_atlas[block_variant][1]]
+            side_surf = self.block_textures[self.glass_atlas[block_variant][2]]
+            top_data = pygame.image.tobytes(top_surf, "RGB", True)
+            bottom_data = pygame.image.tobytes(bottom_surf, "RGB", True)
+            side_data = pygame.image.tobytes(side_surf, "RGB", True)
+
+            self.glass_atlas_tex.write(
+                top_data,
+                viewport=(
+                    self.block_texture_size[0] * 0,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+            self.glass_atlas_tex.write(
+                bottom_data,
+                viewport=(
+                    self.block_texture_size[0] * 1,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+            self.glass_atlas_tex.write(
+                side_data,
+                viewport=(
+                    self.block_texture_size[0] * 2,
+                    self.block_texture_size[1] * (i-1),
+                    self.block_texture_size[0],
+                    self.block_texture_size[1]
+                )
+            )
+
     def get_frame_ray_count(self, pt_fbo: moderngl.Framebuffer) -> None:
         # This calculation is probably wrong, I need to rewrite it
 
@@ -1153,12 +1218,13 @@ class Renderer:
         current_bounces = bounces[frame % 2]
 
         current_fbo.use()
-        self._voxel_tex.use(1)
-        self._sky_texture.use(2)
-        self.block_atlas_tex.use(3)
-        self.emissive_atlas_tex.use(4)
-        self.roughness_atlas_tex.use(5)
-        self.metallic_atlas_tex.use(6)
+        self._voxel_tex.use(0)
+        self._sky_texture.use(1)
+        self.block_atlas_tex.use(2)
+        self.emissive_atlas_tex.use(3)
+        self.roughness_atlas_tex.use(4)
+        self.metallic_atlas_tex.use(5)
+        self.glass_atlas_tex.use(6)
         previous_target.use(7)
         previous_normal.use(8)
         self._pt_vao.render()

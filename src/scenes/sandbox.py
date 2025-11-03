@@ -1,10 +1,10 @@
 """
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 """
 
@@ -30,7 +30,6 @@ class Sandbox(Scene):
         self.camera.position = pygame.Vector3(137.0, 40.0 - 2.5 * 3, 37.5)
         self.camera.yaw = 180.0
         self.camera.pitch = 0.0
-        #self.camera.fov = 23
         self.camera.update()
 
         self.mouse_sensitivity = 0.1
@@ -44,6 +43,8 @@ class Sandbox(Scene):
         self.__acc = 0.0
         self.__acc_last = perf_counter()
         self.__rays_per_sec = 0.0
+
+        shared.renderer.settings.sun_azimuth = 180.0
 
     def update(self) -> None:
         app = shared.app
@@ -328,14 +329,14 @@ class Sandbox(Scene):
             _, renderer.settings.pathtracer_output = imgui.slider_int(f"Out texture", renderer.settings.pathtracer_output, 0, 2, format=out_name)
 
             if imgui.tree_node("High-quality render settings"):
-                _, renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", renderer.settings.highquality_ray_count, 512, 2048)
+                _, renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", renderer.settings.highquality_ray_count, 512, 4096*4)
                 _, renderer.settings.highquality_bounces = imgui.slider_int(f"Bounces", renderer.settings.highquality_bounces, 5, 35)
 
                 imgui.tree_pop()
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Denoising", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Denoising", imgui.TREE_NODE_FRAMED):
             clicked, selected_denoiser = imgui.combo(
                 "Denoiser", renderer.settings.denoiser_id, renderer.settings.denoisers
             )
@@ -360,7 +361,7 @@ class Sandbox(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Camera", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Camera", imgui.TREE_NODE_FRAMED):
             _, self.camera.fov = imgui.slider_float("FOV", self.camera.fov, 0.0, 180.0, format="%.4f")
             _, self.mouse_sensitivity = imgui.slider_float("Sensitivity", self.mouse_sensitivity, 0.01, 0.3, format="%.4f")
             _, camera_mode_int = imgui.slider_int("Mode", self.camera.mode.value, 0, 1, format=self.camera.mode.name.lower().replace("_", " ").capitalize())

@@ -1,10 +1,10 @@
 /*
 
-    Voxel Path Tracer Project
+    Project Lyrae | Physically-based real-time voxel graphics
 
-    This file is a part of the voxel-pathtracer
-    project and distributed under MIT license.
-    https://github.com/kadir014/voxel-pathtracer
+    This file is a part of the Lyrae Project
+    and distributed under MIT license.
+    https://github.com/kadir014/project-lyrae
 
 */
 
@@ -26,6 +26,9 @@ precision mediump float;
 */
 #define DIELECTRIC_BASE_REFLECTANCE 0.04
 
+// Index of Refraction of air
+#define AIR_IOR 1.0
+
 
 // Trowbridge-Reitz / GGX Normal Distribution Function
 float D_GGX(float NoH, float alpha) {
@@ -34,14 +37,14 @@ float D_GGX(float NoH, float alpha) {
     return alpha_sqr / (PI * denom * denom);
 }
 
-// Schlick approximation for Freshnel
+// Schlick approximation for Fresnel term
 vec3 F_Schlick(vec3 f0, float VoH) {
     // f90 = 1.0
     return f0 + (vec3(1.0) - f0) * pow(1.0 - VoH, 5.0);
 }
 
-// Schlick approximation for GGX geometry term
-float G_SchlickGGX(float NdotX, float roughness) {
+// Schlick approximation for GGX monodirectional shadowing function
+float G1_SchlickGGX(float NdotX, float roughness) {
     /*
         According to UE4 paper, this modification is only for analytical light
         sources and makes the results at glancing angles much darker:
@@ -54,10 +57,11 @@ float G_SchlickGGX(float NdotX, float roughness) {
     return NdotX / (NdotX * (1.0 - k) + k);
 }
 
+// Bidirectional shadowing-masking function
 // g1(v) * g1(l)
 float G_Smith(float NdotV, float NdotL, float roughness) {
-    float ggx1 = G_SchlickGGX(NdotV, roughness);
-    float ggx2 = G_SchlickGGX(NdotL, roughness);
+    float ggx1 = G1_SchlickGGX(NdotV, roughness);
+    float ggx2 = G1_SchlickGGX(NdotL, roughness);
     return ggx1 * ggx2;
 }
 
@@ -82,6 +86,5 @@ vec3 GGX_importance_sample(vec2 xi, float roughness, vec3 N) {
     // Tangent to world space
     return tangent_x * H.x + tangent_y * H.y + N * H.z;
 }
-
 
 #endif // MICROFACET_H
