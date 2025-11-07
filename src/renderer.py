@@ -21,7 +21,7 @@ import numpy
 
 from src import shared
 from src.world import BLOCK_IDS
-from src.common import MAX_RAYS_PER_PIXEL
+from src.common import MAX_RAYS_PER_PIXEL, OGL_VERSION
 
 
 start = perf_counter()
@@ -397,7 +397,8 @@ class Renderer:
         self._resolution = resolution
         self._logical_resolution = logical_resolution
 
-        self._context = moderngl.create_context()
+        ogl_version = int(f"{OGL_VERSION[0]}{OGL_VERSION[1]}0")
+        self._context = moderngl.create_context(require=ogl_version)
 
         # Everything is rendered on a screenquad
         base_vertex_shader = """
@@ -474,9 +475,9 @@ class Renderer:
         self._pt_program["u_resolution"] = self._logical_resolution
         self._pt_program["u_voxel_size"] = shared.world.voxel_size
         self._pt_program["u_enable_accumulation"] = True
-        self._pt_program["u_antialiasing"] = 1
+        self._pt_program["u_antialiasing"] = 2
         self._pt_program["u_exp_raymarch"] = 0
-        self._pt_program["u_turbidity"] = 2.0
+        self._pt_program["u_turbidity"] = 2.619
         self._pt_program["u_sun_direction"] = pygame.Vector3(0.0, 1.0, 1.0).normalize()
         self._pt_program["u_sun_radiance"] = (1500.0, 1500.0, 1500.0)
         self._pt_program["u_sun_angular_radius"] = 0.0275
@@ -555,14 +556,14 @@ class Renderer:
         # Note: data type being f4 lets us store colors in HDR
         # Alpha channel in pathtracing textures is for luminance
         self._pathtracer_target_texture0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
-        self._pathtracer_target_texture0.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_target_texture0.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_texture0.repeat_x = False
         self._pathtracer_target_texture0.repeat_y = False
         self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(
             self._pathtracer_target_texture0,self._pathtracer_target_normal0, self._pathtracer_target_bounces0)
         )
         self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
-        self._pathtracer_target_texture1.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._pathtracer_target_texture1.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_texture1.repeat_x = False
         self._pathtracer_target_texture1.repeat_y = False
         self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(
@@ -681,7 +682,7 @@ class Renderer:
             "grass": (50, 50, 50),
             "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness"),
             "lime_wool": (50, 50, 50),
-            "red_wool": (50, 50, 50),
+            "red_wool": (0, 0, 0),
             "red_light": (50, 50, 50),
             "copper_block": ("copper_block_roughness", "copper_block_roughness", "copper_block_roughness")
         }
@@ -707,7 +708,7 @@ class Renderer:
             "grass": (0, 0, 0),
             "iron_block": (0, 0, 0),
             "lime_wool": (0, 0, 0),
-            "red_wool": (0, 0, 0),
+            "red_wool": (100, 100, 100),
             "red_light": (0, 0, 0),
             "copper_block": (0, 0, 0)
         }
@@ -1231,9 +1232,9 @@ class Renderer:
 
         if (self.settings.enable_eye_adaptation):
             current_target.build_mipmaps()
-            current_target.filter = (moderngl.NEAREST_MIPMAP_NEAREST, moderngl.NEAREST_MIPMAP_NEAREST)
+            current_target.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR_MIPMAP_LINEAR)
         else:
-            current_target.filter = (moderngl.NEAREST, moderngl.NEAREST)
+            current_target.filter = (moderngl.LINEAR, moderngl.LINEAR)
 
         if self.settings.pathtracer_output == 0:
             ... # Current target stays the same

@@ -9,7 +9,7 @@
 */
 
 /* OMIT START */
-precision mediump float;
+precision highp float;
 /* OMIT END */
 
 #ifndef FXAA_H

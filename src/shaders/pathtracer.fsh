@@ -294,7 +294,7 @@ HitInfo raymarch(Ray ray) {
     vec3 curr_pos = ray.origin;
     bool inside = sdf(curr_pos) < 0.0;
 
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 500; i++) {
     	float dist = sdf(curr_pos);
 
         if (abs(dist) < EPSILON) {
@@ -644,18 +644,19 @@ vec3 specular_btdf(
 
     float eta = ni / no;
 
-    float NoV = dot(N, V);
-    float NoL = dot(N, L);
-    float NoH = dot(N, H);
-    float VoH  = dot(V, H);
-    float LoH  = dot(L, H);
+    // ? abs because we're in the lower lobe????
+    float NoV = abs(dot(N, V));
+    float NoL = abs(dot(N, L));
+    float NoH = abs(dot(N, H));
+    float VoH  = abs(dot(V, H));
+    float LoH  = abs(dot(L, H));
 
     // TODO: Do tests on which ones to clamp and test for NaNs
 
-    if (NoV <= 0.0 || NoL <= 0.0) {
-        pdf = 0.0;
-        return vec3(0.0);
-    }
+    // if (NoV <= 0.0 || NoL <= 0.0) {
+    //     pdf = 0.0;
+    //     return vec3(0.0);
+    // }
 
     // NoL = clamp(NoL, 0.0, 1.0);
     // NoV = clamp(NoV, 0.0, 1.0);
@@ -943,12 +944,13 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
               Environment sampling
 
          ******************************/
+
         if (!hitinfo.hit) {
             float cos_angle = dot(ray.dir, u_sun_direction);
             float cos_theta_max = cos(u_sun_angular_radius);
 
             // We shouldn't show the sun in the sky to avoid double-counting lights
-            // if NEE is enabled, BRDF shouldn't reach the sun.
+            // if NEE is enabled, BSDF shouldn't reach the sun.
             bool show_sun = (cos_angle >= cos_theta_max) &&
                             (!allow_nee || total_bounces == 0);
 
@@ -1031,8 +1033,9 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
                 }
 
                 // Brings NaNs
-                if (nee_pdf > 0.0)
+                if (nee_pdf > 0.0) {
                     radiance += radiance_delta * nee_bsdf * u_sun_radiance * NoL / sun_pdf;
+                }
             }
         }
 
@@ -1059,7 +1062,8 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
         }
 
         // Spawn new ray from the BSDF reflection
-        ray = Ray(hitinfo.point + (N * EPSILON * 50.0), L);
+        // TODO: Find a better solution than multipling epsilon, otherwise glass doesn't work
+        ray = Ray(hitinfo.point + (N * (EPSILON * 2.1)), L);
 
         // If BSDF sampling reached a transmissive surface, disable NEE so
         // BSDF can reach sky
@@ -1073,7 +1077,7 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
             As the throughput gets smaller, the ray is more likely to get terminated early.
             Survivors have their value boosted to make up for fewer samples being in the average.
         */
-        if (u_enable_roulette) {
+        if (u_enable_roulette && total_bounces > 3) {
             float roulette_result = max(radiance_delta.r, max(radiance_delta.g, radiance_delta.b));
 
             float roulette_chance = 0.0;
@@ -1129,6 +1133,9 @@ void main() {
                 the temporal jitter gets accumulated and averaged.
                 But works with single frame renders as well.
                 We can use whitenoise PRNG as this doesn't affect UV.
+
+                HOWEVER! This does not work well with temporal accumulation and
+                reprojection. It makes the edges noisier and everything blurry.
             */
             vec2 jitter_amount = 1.0 / u_resolution;
             jitter_amount *= 2.0;
@@ -1168,8 +1175,8 @@ void main() {
         old frames do not have as much impact as the newer ones. This leads to
         some added noise and sharp reflections being delayed.
 
-        I'm sure there are solutions for these problems but I'm fine with my
-        current implementation.
+        I'm sure there are smarter solutions for these problems but I'm fine
+        with my current implementation.
     */
     float max_accumulation_frames = 16.0;
     if (u_enable_accumulation) {
@@ -1201,7 +1208,13 @@ void main() {
             float normal_threshold = 0.97;
             float depth_threshold = 0.12;
 
-            if (normal_diff > normal_threshold && rel_depth_diff < depth_threshold) {
+            //issue = true;
+            //issue_color = vec3(normal_diff);
+
+            if (
+                normal_diff > normal_threshold &&
+                rel_depth_diff < depth_threshold
+            ) {
                 vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
 
                 // Temporal blending weight

@@ -55,7 +55,7 @@ class HitInfo:
 class VoxelWorld:
     def __init__(self,
             dimensions: tuple[int, int, int],
-            voxel_size: float = 5.0
+            voxel_size: float = 1.0
             ) -> None:
         self.dimensions = dimensions
         self.voxel_size = voxel_size
@@ -100,6 +100,12 @@ class VoxelWorld:
             for z in range(self.dimensions[2]):
                 for x in range(self.dimensions[0]):
                     self.__map[(x, y, z)] = 0
+
+    def iter_coords(self):
+        for y in range(self.dimensions[1]):
+            for z in range(self.dimensions[2]):
+                for x in range(self.dimensions[0]):
+                    yield (x, y, z)
 
     def dda(self,
             origin: pygame.Vector3,

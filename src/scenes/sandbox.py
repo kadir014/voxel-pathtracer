@@ -18,6 +18,7 @@ from src import shared
 from src.scene import Scene
 from src.camera import CameraMode
 from src.common import HIDE_HW_INFO, MAX_BOUNCES
+from src.controller import PlayerController
 
 
 class Sandbox(Scene):
@@ -26,14 +27,16 @@ class Sandbox(Scene):
 
         pygame.mouse.set_relative_mode(True)
 
-        # Cornell box camera
         self.camera.position = pygame.Vector3(137.0, 40.0 - 2.5 * 3, 37.5)
         self.camera.yaw = 180.0
         self.camera.pitch = 0.0
         self.camera.update()
 
+        self.player = PlayerController(pygame.Vector3(8, 8, 8))
+
         self.mouse_sensitivity = 0.1
-        self.movement_speed = 34.0
+        self.movement_speed = 35.0
+        self.jump_strength = 6.5
 
         self.color_profiles = ["Nice-ish", "Zeroes", "Noir"]
         self.current_color_profile = 0
@@ -92,7 +95,11 @@ class Sandbox(Scene):
                     should_reset_acc = True
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LALT:
+                if event.key == pygame.K_SPACE:
+                    if self.player.on_ground:
+                        self.player.velocity.y += self.jump_strength
+
+                elif event.key == pygame.K_LALT:
                     pygame.mouse.set_relative_mode(not pygame.mouse.get_relative_mode())
 
                 elif event.key == pygame.K_F12:
@@ -169,22 +176,20 @@ class Sandbox(Scene):
         mov = self.movement_speed * app.dt
 
         if keys[pygame.K_w]:
-            if self.camera.mode == CameraMode.FIRST_PERSON:
-                self.camera.move(mov)
-            else:
-                self.camera.distance -= mov * 2.0
+            horizontal_front = pygame.Vector3(self.camera.front.x, 0.0, self.camera.front.z).normalize()
+            self.player.velocity += horizontal_front * mov
 
         if keys[pygame.K_s]:
-            if self.camera.mode == CameraMode.FIRST_PERSON:
-                self.camera.move(-mov)
-            else:
-                self.camera.distance += mov * 2.0
+            horizontal_front = pygame.Vector3(self.camera.front.x, 0.0, self.camera.front.z).normalize()
+            self.player.velocity -= horizontal_front * mov
 
         if keys[pygame.K_a]:
-            self.camera.strafe(-mov)
+            right = self.camera.front.cross(self.camera.up).normalize()
+            self.player.velocity -= right * mov
 
         if keys[pygame.K_d]:
-            self.camera.strafe(mov)
+            right = self.camera.front.cross(self.camera.up).normalize()
+            self.player.velocity += right * mov
 
         if keys[pygame.K_e]:
             self.camera.position -= self.camera.up * mov
@@ -202,6 +207,9 @@ class Sandbox(Scene):
                 shared.world.dimensions[2] * shared.world.voxel_size * 0.5
             )
             self.camera.target = world_center
+
+        self.player.update(app.dt)
+        self.camera.position = self.player.position + pygame.Vector3(self.player.hitbox.max.x * 0.5, self.player.hitbox.max.y, self.player.hitbox.max.z * 0.5)
 
         self.camera.update()
         self._update_camera_uniform()
@@ -364,8 +372,6 @@ class Sandbox(Scene):
         if imgui.tree_node("Camera", imgui.TREE_NODE_FRAMED):
             _, self.camera.fov = imgui.slider_float("FOV", self.camera.fov, 0.0, 180.0, format="%.4f")
             _, self.mouse_sensitivity = imgui.slider_float("Sensitivity", self.mouse_sensitivity, 0.01, 0.3, format="%.4f")
-            _, camera_mode_int = imgui.slider_int("Mode", self.camera.mode.value, 0, 1, format=self.camera.mode.name.lower().replace("_", " ").capitalize())
-            self.camera.mode = CameraMode(camera_mode_int)
 
             imgui.tree_pop()
 

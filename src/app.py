@@ -15,7 +15,7 @@ import moderngl
 import imgui
 
 from src import shared
-from src.common import __version__
+from src.common import __version__, OGL_VERSION
 from src.world import VoxelWorld
 from src.renderer import Renderer
 from src.gui import ImguiPygameModernGLAbomination
@@ -46,6 +46,11 @@ class App:
 
         self._resolution = resolution
         self._logical_resolution = logical_resolution
+
+        pygame.init()
+
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, OGL_VERSION[0])
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, OGL_VERSION[1])
 
         pygame.display.set_mode(self._resolution, pygame.OPENGL | pygame.DOUBLEBUF)
         pygame.display.set_caption(f"Voxel Pathtracer {__version__}")

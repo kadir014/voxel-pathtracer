@@ -9,7 +9,7 @@
 */
 
 /* OMIT START */
-precision mediump float;
+precision highp float;
 #extension GL_ARB_shading_language_include: enable
 /* OMIT END */
 
@@ -52,15 +52,13 @@ vec3 zenith_chromaticity(float T, float theta_s) {
     float theta_s3 = theta_s2 * theta_s;
     float T2 = T * T;
 
-	float xz =
-        ( 0.0017 * theta_s3 - 0.0037 * theta_s2 + 0.0021 * theta_s + 0.0   ) * T2 +
-        (-0.0290 * theta_s3 + 0.0638 * theta_s2 - 0.0320 * theta_s + 0.0039) * T +
-        ( 0.1169 * theta_s3 - 0.2120 * theta_s2 + 0.0605 * theta_s + 0.2589);
+	float xz = ( 0.0017 * theta_s3 - 0.0037 * theta_s2 + 0.0021 * theta_s + 0.0   ) * T2 +
+               (-0.0290 * theta_s3 + 0.0638 * theta_s2 - 0.0320 * theta_s + 0.0039) * T +
+               ( 0.1169 * theta_s3 - 0.2120 * theta_s2 + 0.0605 * theta_s + 0.2589);
 
-    float yz =
-        ( 0.0028 * theta_s3 - 0.0061 * theta_s2 + 0.0032 * theta_s + 0.0   ) * T2 +
-        (-0.0421 * theta_s3 + 0.0897 * theta_s2 - 0.0415 * theta_s + 0.0052) * T +
-        ( 0.1535 * theta_s3 - 0.2676 * theta_s2 + 0.0667 * theta_s + 0.2669);
+    float yz = ( 0.0028 * theta_s3 - 0.0061 * theta_s2 + 0.0032 * theta_s + 0.0   ) * T2 +
+               (-0.0421 * theta_s3 + 0.0897 * theta_s2 - 0.0415 * theta_s + 0.0052) * T +
+               ( 0.1535 * theta_s3 - 0.2676 * theta_s2 + 0.0667 * theta_s + 0.2669);
 
 	return vec3(xz, yz, Yz);
 }

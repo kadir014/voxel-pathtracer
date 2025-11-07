@@ -16,6 +16,8 @@ __version__ = "0.0.4"
 WINDOW_WIDTH = 1920
 WINDOW_HEIGHT = 1080
 
+OGL_VERSION = (4, 6)
+
 # Renderer logical resolution
 # e.g a logical scale of 0.5 would render at half the window resolution
 LOGICAL_SCALE = 0.75

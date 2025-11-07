@@ -9,7 +9,7 @@
 */
 
 /* OMIT START */
-precision mediump float;
+precision highp float;
 #extension GL_ARB_shading_language_include: enable
 /* OMIT END */
 
