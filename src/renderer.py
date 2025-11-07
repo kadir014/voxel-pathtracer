@@ -25,7 +25,7 @@ from src.common import MAX_RAYS_PER_PIXEL, OGL_VERSION
 
 
 start = perf_counter()
-print("Loading Heitz Bluenoise data, this may take a little while (I'm going to optimize this I promise 😭)")
+print("Loading Heitz Bluenoise data...")
 # TODO: OPTIMIZE!
 import src.heitz as heitz
 elapsed = perf_counter() - start
