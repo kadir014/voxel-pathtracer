@@ -364,7 +364,7 @@ class ShaderPatcher:
                     new_content += self.headers[path]
 
                 else:
-                    path = "src/shaders/" + path
+                    path = "src/shaders/libs/" + path
 
                     with open(path, "r", encoding="utf-8") as f:
                         include_content = self.patch_stream(f)
@@ -417,17 +417,21 @@ class Renderer:
         """
 
         self.patcher = ShaderPatcher()
-        self.patcher.patch_header("common.glsl", "src/shaders/common.glsl")
-        self.patcher.patch_header("color.glsl", "src/shaders/color.glsl")
-        self.patcher.patch_header("microfacet.glsl", "src/shaders/microfacet.glsl")
-        self.patcher.patch_header("bicubic.glsl", "src/shaders/bicubic.glsl")
-        self.patcher.patch_header("fxaa.glsl", "src/shaders/fxaa.glsl")
-        self.patcher.patch_header("preetham.glsl", "src/shaders/preetham.glsl")
-        self.patcher.patch_file("post.fsh", "src/shaders/post.fsh")
-        self.patcher.patch_file("upscale.fsh", "src/shaders/upscale.fsh")
-        self.patcher.patch_file("pathtracer.fsh", "src/shaders/pathtracer.fsh")
-        self.patcher.patch_file("fxaa_pass.fsh", "src/shaders/fxaa_pass.fsh")
-        self.patcher.patch_file("denoise.fsh", "src/shaders/denoise.fsh")
+        self.patcher.patch_header("common.glsl", "src/shaders/libs/common.glsl")
+        self.patcher.patch_header("types.glsl", "src/shaders/libs/types.glsl")
+        self.patcher.patch_header("color.glsl", "src/shaders/libs/color.glsl")
+        self.patcher.patch_header("prng.glsl", "src/shaders/libs/prng.glsl")
+        self.patcher.patch_header("heitz.glsl", "src/shaders/libs/heitz.glsl")
+        self.patcher.patch_header("bsdf.glsl", "src/shaders/libs/bsdf.glsl")
+        self.patcher.patch_header("microfacet.glsl", "src/shaders/libs/microfacet.glsl")
+        self.patcher.patch_header("bicubic.glsl", "src/shaders/libs/bicubic.glsl")
+        self.patcher.patch_header("fxaa.glsl", "src/shaders/libs/fxaa.glsl")
+        self.patcher.patch_header("preetham.glsl", "src/shaders/libs/preetham.glsl")
+        self.patcher.patch_file("post.glsl", "src/shaders/programs/post.glsl")
+        self.patcher.patch_file("upscale.glsl", "src/shaders/programs/upscale.glsl")
+        self.patcher.patch_file("pathtracer.glsl", "src/shaders/programs/pathtracer.glsl")
+        self.patcher.patch_file("fxaa_pass.glsl", "src/shaders/programs/fxaa_pass.glsl")
+        self.patcher.patch_file("denoise.glsl", "src/shaders/programs/denoise.glsl")
 
         # All VAOs will use the same buffers since they are all just plain screen quads
         self._vbo = self.create_buffer_object([-1.0, 1.0, 1.0, 1.0, -1.0, -1.0, 1.0, -1.0])
@@ -436,7 +440,7 @@ class Renderer:
 
         self._post_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=self.patcher.shaders["post.fsh"]
+            fragment_shader=self.patcher.shaders["post.glsl"]
         )
         self._post_program["u_enable_post"] = True
         self._post_program["u_tonemapper"] = 1
@@ -455,7 +459,7 @@ class Renderer:
 
         self._pt_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=self.patcher.shaders["pathtracer.fsh"]
+            fragment_shader=self.patcher.shaders["pathtracer.glsl"]
         )
         self._pt_program["s_grid"] = 0
         self._pt_program["s_sky"] = 1
@@ -493,7 +497,7 @@ class Renderer:
 
         self._upscale_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=self.patcher.shaders["upscale.fsh"]
+            fragment_shader=self.patcher.shaders["upscale.glsl"]
         )
         self._upscale_program["s_texture"] = 0
         self._upscale_program["s_overlay"] = 1
@@ -511,7 +515,7 @@ class Renderer:
 
         self._fxaa_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=self.patcher.shaders["fxaa_pass.fsh"]
+            fragment_shader=self.patcher.shaders["fxaa_pass.glsl"]
         )
         self._fxaa_program["s_texture"] = 0
         self._fxaa_program["u_resolution"] = self._logical_resolution
@@ -527,7 +531,7 @@ class Renderer:
 
         self._denoise_program = self._context.program(
             vertex_shader=base_vertex_shader,
-            fragment_shader=self.patcher.shaders["denoise.fsh"]
+            fragment_shader=self.patcher.shaders["denoise.glsl"]
         )
         self._denoise_program["s_texture"] = 0
         self._denoise_program["u_resolution"] = self._logical_resolution

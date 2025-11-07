@@ -19,9 +19,9 @@
 #version 460
 #extension GL_ARB_shading_language_include: enable
 
-#include "common.glsl"
-#include "bicubic.glsl"
-#include "color.glsl"
+#include "../libs/common.glsl"
+#include "../libs/bicubic.glsl"
+#include "../libs/color.glsl"
 
 in vec2 v_uv;
 out vec4 f_color;

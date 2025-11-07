@@ -19,17 +19,6 @@ precision highp float;
 #include "common.glsl"
 
 
-/*
-    No real world material has a reflectance lower than 2% (0.02).
-    Use 4% as the default constant for dielectrics for consistency
-    with other PBR specifications.
-*/
-#define DIELECTRIC_BASE_REFLECTANCE 0.04
-
-// Index of Refraction of air
-#define AIR_IOR 1.0
-
-
 // Trowbridge-Reitz / GGX Normal Distribution Function
 float D_GGX(float NoH, float alpha) {
     float alpha_sqr = alpha * alpha;

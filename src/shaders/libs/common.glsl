@@ -16,6 +16,12 @@ precision highp float;
 #define COMMON_H
 
 
+/******************************************************
+
+                Mathematical Constants
+
+ ******************************************************/
+
 #define PI      3.141592653589793238462643383279
 #define TAU     6.283185307179586476925286766559
 #define INV_PI  0.318309886183790671537767526745 // 1.0 / pi
@@ -24,7 +30,6 @@ precision highp float;
 #define GAMMA   0.454545454545454545454545454545 // 1.0 / 2.2
 #define SQRT2   1.414213562373095048801688724209 // sqrt(2.0)
 
-
 #define EPSILON 0.0005
 
 // TODO: Do we need to actually store the maximum value?
@@ -32,23 +37,52 @@ precision highp float;
 #define HIGHP_FLT_MAX 999999.0
 
 
+/******************************************************
+
+                     Enumerations
+
+ ******************************************************/
+
 #define ANTIALIASING_NONE            0
 #define ANTIALIASING_JITTERSAMPLING  1
 #define ANTIALIASING_FXAA            2
-
 
 #define NOISE_METHOD_NONE            0
 #define NOISE_METHOD_PRNG            1
 #define NOISE_METHOD_HEITZ_BLUENOISE 2
 
-
 #define DENOISER_NONE                0
 #define DENOISER_BILATERAL           1
-
 
 #define UPSCALING_METHOD_NEAREST     0
 #define UPSCALING_METHOD_BILINEAR    1
 #define UPSCALING_METHOD_BICUBIC     2
+
+
+/******************************************************
+
+                   Rendering Constants
+
+ ******************************************************/
+
+/*
+    No real world material has a reflectance lower than 2% (0.02).
+    Use 4% as the default constant for dielectrics for consistency
+    with other PBR specifications.
+*/
+#define DIELECTRIC_BASE_REFLECTANCE 0.04
+
+// GGX can mess up if roughness is exactly 0, so clamp it to a minimum value
+#define MIN_ROUGHNESS 0.05
+
+// Index of Refraction of air
+#define AIR_IOR 1.0
+
+// Maximum allowed number of steps in DDA
+#define MAX_DDA_STEPS 56 // 16 * sqrt(3) * 2
+
+// Factor to multiply emissive surface colors by 
+#define EMISSIVE_MULT 2.7
 
 
 /*

@@ -17,7 +17,7 @@
 #version 460
 #extension GL_ARB_shading_language_include: enable
 
-#include "common.glsl"
+#include "../libs/common.glsl"
 
 
 in vec2 v_uv;
