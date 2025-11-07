@@ -96,3 +96,8 @@ $ python main.py
 
 # License
 [MIT](LICENSE) © Kadir Aksoy
+
+Project Lyrae is, and always will be, free and open-source. Although I would greatly appreciate if you wanted to support me & my studies! ❤️
+
+<a href="https://github.com/sponsors/kadir014"><img src="https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=#white"></a>
+<a href="https://www.buymeacoffee.com/kadir014"><img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black"></a>
