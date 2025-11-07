@@ -48,7 +48,10 @@ A physically-based real-time voxel path traced renderer.
 - Volumetric clouds (realistic & stylistic)
 - Sparse octree acceleration for world traversal
 - Volumetric mediums
+  - Better atmospheric fog & implicit godrays
 - Proper denoising
+  - Better guided bilateral
+  - SVGF
 - Multiple importance sampling (MIS) with NEE
 
 
@@ -58,15 +61,16 @@ You need Python 3.11+. After cloning the repo, install required packages:
 ```shell
 $ python -m pip install -r requirements.txt
 ```
-And then just run `main.py`. You can edit `src/common.py` to adjust common settings.
+And then just run `main.py`.
 ```shell
 $ python main.py
 ```
+You can edit `src/common.py` to adjust common settings such as window resolution.
 
 
 # Gallery
 <details>
-<summary>Click here to see images (loading may take a second)</summary>
+<summary>Click here to see images</summary>
 
 <img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/cornell_box.png">
 
@@ -97,7 +101,7 @@ $ python main.py
 # License
 [MIT](LICENSE) © Kadir Aksoy
 
-Project Lyrae is, and always will be, free and open-source. Although I would greatly appreciate if you wanted to support me & my studies! ❤️
+If you enjoy my projects, I would greatly appreciate if you wanted to support me & my studies! ❤️
 
 <a href="https://github.com/sponsors/kadir014"><img src="https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=#white"></a>
 <a href="https://www.buymeacoffee.com/kadir014"><img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black"></a>
