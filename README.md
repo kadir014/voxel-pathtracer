@@ -54,6 +54,18 @@ A physically-based real-time voxel path traced renderer.
 
 
 
+# Gallery
+<details>
+<summary>Click here to see images</summary>
+
+<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/cornell_box.png">
+
+<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/couch.png">
+
+</details>
+<br>
+
+
 # Running
 You need Python 3.11+. After cloning the repo, install required packages:
 ```shell
@@ -65,17 +77,6 @@ $ python main.py
 ```
 You can edit `src/common.py` to adjust common settings such as window resolution.
 
-
-# Gallery
-<details>
-<summary>Click here to see images</summary>
-
-<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/cornell_box.png">
-
-<img src="https://raw.githubusercontent.com/kadir014/project-lyrae/refs/heads/main/data/gallery/couch.png">
-
-</details>
-<br>
 
 
 # Resources & References
