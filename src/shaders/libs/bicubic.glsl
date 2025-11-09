@@ -16,57 +16,35 @@ precision highp float;
 #define BICUBIC_H
 
 
-// Bicubic sampling from https://www.shadertoy.com/view/msj3zw
+// Bicubic sampling from iq: https://www.shadertoy.com/view/XsSXDy
+// uses catmull-rom weights
 
-vec4 cubic(float v) {
-    vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v;
-    vec4 s = n * n * n;
-    vec4 o;
-    o.x = s.x;
-    o.y = s.y - 4.0 * s.x;
-    o.z = s.z - 4.0 * s.y + 6.0 * s.x;
-    o.w = 6.0 - o.x - o.y - o.z;
-    return o;
+vec4 powers(float x) {return vec4(x*x*x, x*x, x, 1.0);}
+
+vec4 spline(float x, vec4 c0, vec4 c1, vec4 c2, vec4 c3) {
+    vec4 ca = vec4( 3.0,  -5.0,   0.0,  2.0 ) / 2.0;
+    vec4 cb = vec4(-1.0,   5.0,  -8.0,  4.0 ) / 2.0;
+
+    // We could expand the powers and build a matrix instead (twice as many coefficients
+    // would need to be stored, but it could be faster.
+    return c0 * dot( cb, powers(x + 1.0)) + 
+           c1 * dot( ca, powers(x      )) +
+           c2 * dot( ca, powers(1.0 - x)) +
+           c3 * dot( cb, powers(2.0 - x));
 }
 
-/*
-    @brief Retrieve a texel from a texture using bicubic sampling.
+#define SAM(a,b)  texture(tex, (i+vec2(float(a),float(b))+0.5)/res, -99.0)
 
-    @param tex 2D sampler to fetch
-    @param uv 2D texture coordinates
-*/
-vec4 textureBicubic(sampler2D tex, vec2 uv) {
-    vec2 texSize = vec2(textureSize(tex, 0));
-    vec2 invTexSize = 1.0 / texSize;
+vec4 texture_Bicubic(sampler2D tex, vec2 t) {
+    vec2 res = vec2(textureSize(tex, 0));
+    vec2 p = res*t - 0.5;
+    vec2 f = fract(p);
+    vec2 i = floor(p);
 
-    uv = uv * texSize - 0.5;
-
-    vec2 fxy = fract(uv);
-    uv -= fxy;
-
-    vec4 xcubic = cubic(fxy.x);
-    vec4 ycubic = cubic(fxy.y);
-
-    vec4 c = uv.xxyy + vec2 (-0.5, +1.5).xyxy;
-
-    vec4 s = vec4(xcubic.xz + xcubic.yw, ycubic.xz + ycubic.yw);
-    vec4 offset = c + vec4 (xcubic.yw, ycubic.yw) / s;
-
-    offset *= invTexSize.xxyy;
-
-    vec4 sample0 = texture(tex, offset.xz);
-    vec4 sample1 = texture(tex, offset.yz);
-    vec4 sample2 = texture(tex, offset.xw);
-    vec4 sample3 = texture(tex, offset.yw);
-
-    float sx = s.x / (s.x + s.y);
-    float sy = s.z / (s.z + s.w);
-
-    return mix(
-       mix(sample3, sample2, sx),
-       mix(sample1, sample0, sx),
-       sy
-    );
+    return spline( f.y, spline( f.x, SAM(-1,-1), SAM( 0,-1), SAM( 1,-1), SAM( 2,-1)),
+                        spline( f.x, SAM(-1, 0), SAM( 0, 0), SAM( 1, 0), SAM( 2, 0)),
+                        spline( f.x, SAM(-1, 1), SAM( 0, 1), SAM( 1, 1), SAM( 2, 1)),
+                        spline( f.x, SAM(-1, 2), SAM( 0, 2), SAM( 1, 2), SAM( 2, 2)));
 }
 
 

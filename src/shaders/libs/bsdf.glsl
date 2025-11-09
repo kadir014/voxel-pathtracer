@@ -417,4 +417,53 @@ vec3 sample_bsdf(
 }
 
 
+/*
+    Sample sun
+*/
+void sample_sun_cone(
+    vec3 sun_dir,
+    float sun_angular_radius,
+    out vec3 world_dir,
+    out float pdf
+) {
+    // There must be a better way...
+
+    // We want to sample the sun disk over the hemisphere which creates a cone
+    
+    float r0 = 0.0;
+    float r1 = 0.0;
+    if (u_noise_method == NOISE_METHOD_PRNG) {
+        r0 = prng();
+        r1 = prng();
+    }
+    else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
+        r0 = heitz_sample();
+        r1 = heitz_sample();
+    }
+
+    float cos_theta_max = cos(sun_angular_radius);
+    float cos_theta = mix(cos_theta_max, 1.0, r0);
+    float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+    float phi = TAU * r1;
+
+    // Spherical
+    vec3 local = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
+
+    // Should I use the same basis in GGX importance sampler?
+    vec3 w = normalize(sun_dir);
+    vec3 up = abs(w.z) > 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 tangent = normalize(cross(up, w));
+    vec3 bitangent = cross(w, tangent);
+
+    world_dir = normalize(
+        tangent * local.x +
+        bitangent * local.y +
+        w * local.z
+    );
+
+    float solid_angle = TAU * (1.0 - cos_theta);
+    pdf = 1.0 / solid_angle;
+}
+
+
 #endif // BSDF_H

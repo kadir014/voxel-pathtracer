@@ -23,6 +23,7 @@ A physically-based real-time voxel path traced renderer.
   - Low-discrepancy blue noise sampling
   - Temporal accumulation with reprojection for noise reduction
   - Next Event Estimation (NEE) for explicit sun sampling
+  - Edge avoiding À-Trous denoising
   - Multiple anti-aliasing methods like FXAA and subpixel jitter
 
 - **Physically-Based Materials**
@@ -49,9 +50,6 @@ A physically-based real-time voxel path traced renderer.
 - Sparse octree acceleration for world traversal
 - Volumetric mediums
   - Better atmospheric fog & implicit godrays
-- Proper denoising
-  - Better guided bilateral
-  - SVGF
 - Multiple importance sampling (MIS) with NEE
 
 
@@ -82,6 +80,7 @@ You can edit `src/common.py` to adjust common settings such as window resolution
 
 # Resources & References
 - E. Heitz et al — [A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space](https://eheitzresearch.wordpress.com/762-2/)
+- H. Dammertz et al — [Edge-Avoiding À-Trous Wavelet Transform for fast Global Illumination Filtering](https://jo.dreggn.org/home/2010_atrous.pdf)
 - M. Pharr, W. Jakob, and G. Humphreys — ["Physically Based Rendering" book](https://www.pbr-book.org/4ed/contents)
 - P. Shirley, T. Black, S. Hollasch — ["Ray Tracing in One Weekend" book series](https://raytracing.github.io/)
 - TU Wien — [2021 Rendering Lectures](https://www.youtube.com/watch?v=FU1dbi827LY&list=PLmIqTlJ6KsE2yXzeq02hqCDpOdtj6n6A9&index=10)

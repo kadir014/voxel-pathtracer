@@ -84,7 +84,7 @@ class Sandbox(Scene):
                 if hitinfo.hit:
                     shared.world[ivoxel] = block
                     renderer.update_grid_texture()
-                    should_reset_acc = True
+                    #should_reset_acc = True
 
             elif event.type == pygame.MOUSEBUTTONUP:
                 # TODO: Resetting accumulation every mouse button event
@@ -333,8 +333,8 @@ class Sandbox(Scene):
             up_name = ("Nearest", "Bilinear", "Bicubic")[renderer.settings.upscaling_method]
             _, renderer.settings.upscaling_method = imgui.slider_int(f"Upscaler", renderer.settings.upscaling_method, 0, 2, format=up_name)
 
-            out_name = ("GI", "Normals", "Bounces")[renderer.settings.pathtracer_output]
-            _, renderer.settings.pathtracer_output = imgui.slider_int(f"Out texture", renderer.settings.pathtracer_output, 0, 2, format=out_name)
+            out_name = ("PT GI", "Normals", "Depth", "Bounces", "Position", "Albedo")[renderer.settings.target_buffer]
+            _, renderer.settings.target_buffer = imgui.slider_int(f"Display buffer", renderer.settings.target_buffer, 0, 5, format=out_name)
 
             if imgui.tree_node("High-quality render settings"):
                 _, renderer.settings.highquality_ray_count = imgui.slider_int(f"Rays/pixel", renderer.settings.highquality_ray_count, 512, 4096*4)
@@ -352,9 +352,15 @@ class Sandbox(Scene):
                 renderer.settings.denoiser_id = selected_denoiser
 
             if selected_denoiser == 1:
-                _, renderer._denoise_program["u_hw"] = imgui.slider_int(f"u_hw", renderer._denoise_program["u_hw"].value, 1, 14)
-                _, renderer._denoise_program["u_sigmaspace"] = imgui.slider_float(f"u_sigmaspace", renderer._denoise_program["u_sigmaspace"].value, 0.1, 50.0)
-                _, renderer._denoise_program["u_sigmacolor"] = imgui.slider_float(f"u_sigmacolor", renderer._denoise_program["u_sigmacolor"].value, 0.1, 50.0)
+                _, renderer._denoise_program["u_bilateral_data.hw"] = imgui.slider_int(f"hw", renderer._denoise_program["u_bilateral_data.hw"].value, 1, 14)
+                _, renderer._denoise_program["u_bilateral_data.sigmaspace"] = imgui.slider_float(f"sigmaspace", renderer._denoise_program["u_bilateral_data.sigmaspace"].value, 0.1, 50.0)
+                _, renderer._denoise_program["u_bilateral_data.sigmacolor"] = imgui.slider_float(f"sigmacolor", renderer._denoise_program["u_bilateral_data.sigmacolor"].value, 0.1, 50.0)
+
+            elif selected_denoiser == 2:
+                _, renderer.settings.atrous_iters = imgui.slider_int(f"Iterations", renderer.settings.atrous_iters, 1, 10)
+                _, renderer._denoise_program["u_atrous_data.gi_phi"] = imgui.slider_float(f"gi_phi", renderer._denoise_program["u_atrous_data.gi_phi"].value, 0.0, 2.0)
+                _, renderer._denoise_program["u_atrous_data.normal_phi"] = imgui.slider_float(f"normal_phi", renderer._denoise_program["u_atrous_data.normal_phi"].value, 0.0, 0.5)
+                _, renderer._denoise_program["u_atrous_data.position_phi"] = imgui.slider_float(f"position_phi", renderer._denoise_program["u_atrous_data.position_phi"].value, 0.0, 0.5)
 
             imgui.tree_pop()
 

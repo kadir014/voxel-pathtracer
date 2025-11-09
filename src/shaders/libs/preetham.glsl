@@ -97,4 +97,4 @@ vec3 preetham_sky(vec3 sun_dir, vec3 view_dir, float turbidity) {
 }
 
 
-#endif  // PREETHAM_H
+#endif // PREETHAM_H

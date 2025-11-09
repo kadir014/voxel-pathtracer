@@ -73,12 +73,18 @@ class RendererSettings:
         self.denoisers = [
             "None",
             "Bilateral",
+            "Edge Avoiding A-Trous"
         ]
+
+        self.atrous_iters = 1
 
         # 0 -> Pathtraced global illumination
         # 1 -> Normals
-        # 2 -> Bounces
-        self.pathtracer_output = 0
+        # 2 -> Depth
+        # 3 -> Bounces
+        # 4 -> Positions
+        # 5 -> Albedo
+        self.target_buffer = 0
 
         self.collect_information = False
 
@@ -425,6 +431,8 @@ class Renderer:
         self.patcher.patch_header("bsdf.glsl", "src/shaders/libs/bsdf.glsl")
         self.patcher.patch_header("microfacet.glsl", "src/shaders/libs/microfacet.glsl")
         self.patcher.patch_header("bicubic.glsl", "src/shaders/libs/bicubic.glsl")
+        self.patcher.patch_header("bilateral.glsl", "src/shaders/libs/bilateral.glsl")
+        self.patcher.patch_header("atrous.glsl", "src/shaders/libs/atrous.glsl")
         self.patcher.patch_header("fxaa.glsl", "src/shaders/libs/fxaa.glsl")
         self.patcher.patch_header("preetham.glsl", "src/shaders/libs/preetham.glsl")
         self.patcher.patch_file("post.glsl", "src/shaders/programs/post.glsl")
@@ -447,6 +455,7 @@ class Renderer:
         self._post_program["u_chromatic_aberration"] = 0.0035
         self._post_program["s_texture"] = 0
         self._post_program["s_lum"] = 1
+        self._post_program["s_albedo"] = 2
 
         self._post_vao = self._context.vertex_array(
             self._post_program,
@@ -534,11 +543,17 @@ class Renderer:
             fragment_shader=self.patcher.shaders["denoise.glsl"]
         )
         self._denoise_program["s_texture"] = 0
-        self._denoise_program["u_resolution"] = self._logical_resolution
         self._denoise_program["u_denoiser"] = 0
-        self._denoise_program["u_hw"] = 4
-        self._denoise_program["u_sigmaspace"] = 10.0
-        self._denoise_program["u_sigmacolor"] = 25.0
+        self._denoise_program["u_resolution"] = self._logical_resolution
+        self._denoise_program["u_atrous_data.gi_map"] = 0
+        self._denoise_program["u_atrous_data.normal_map"] = 2
+        self._denoise_program["u_atrous_data.position_map"] = 3
+        self._denoise_program["u_atrous_data.gi_phi"] = 0.7
+        self._denoise_program["u_atrous_data.normal_phi"] = 0.07
+        self._denoise_program["u_atrous_data.position_phi"] = 0.07
+        self._denoise_program["u_bilateral_data.hw"] = 4
+        self._denoise_program["u_bilateral_data.sigmaspace"] = 10.0
+        self._denoise_program["u_bilateral_data.sigmacolor"] = 25.0
 
         self._denoise_vao = self._context.vertex_array(
             self._denoise_program,
@@ -548,6 +563,13 @@ class Renderer:
             ),
             self._ibo
         )
+
+        # These are not used for temporal accumulation
+        # so only one buffer instead of two
+        self._pathtracer_target_position = self._context.texture(self._logical_resolution, 4, dtype="f4")
+        self._pathtracer_target_position.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._pathtracer_target_albedo = self._context.texture(self._logical_resolution, 4, dtype="f4")
+        self._pathtracer_target_albedo.filter = (moderngl.LINEAR, moderngl.LINEAR)
 
         self._pathtracer_target_normal0 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_normal0.filter = (moderngl.LINEAR, moderngl.LINEAR)
@@ -563,15 +585,27 @@ class Renderer:
         self._pathtracer_target_texture0.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_texture0.repeat_x = False
         self._pathtracer_target_texture0.repeat_y = False
-        self._pathtracer_fbo0 = self._context.framebuffer(color_attachments=(
-            self._pathtracer_target_texture0,self._pathtracer_target_normal0, self._pathtracer_target_bounces0)
+        self._pathtracer_fbo0 = self._context.framebuffer(
+            color_attachments=(
+                self._pathtracer_target_texture0,
+                self._pathtracer_target_normal0,
+                self._pathtracer_target_bounces0,
+                self._pathtracer_target_position,
+                self._pathtracer_target_albedo
+            )
         )
         self._pathtracer_target_texture1 = self._context.texture(self._logical_resolution, 4, dtype="f4")
         self._pathtracer_target_texture1.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._pathtracer_target_texture1.repeat_x = False
         self._pathtracer_target_texture1.repeat_y = False
-        self._pathtracer_fbo1 = self._context.framebuffer(color_attachments=(
-            self._pathtracer_target_texture1,self._pathtracer_target_normal1, self._pathtracer_target_bounces1)
+        self._pathtracer_fbo1 = self._context.framebuffer(
+            color_attachments=(
+                self._pathtracer_target_texture1,
+                self._pathtracer_target_normal1,
+                self._pathtracer_target_bounces1,
+                self._pathtracer_target_position,
+                self._pathtracer_target_albedo
+            )
         )
 
 
@@ -583,11 +617,16 @@ class Renderer:
         self._post_target_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._post_fbo = self._context.framebuffer(color_attachments=(self._post_target_texture,))
 
-        self._denoise_target_texture = self._context.texture(self._logical_resolution, 3, dtype="f4")
-        self._denoise_target_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        self._denoise_target_texture.repeat_x = False
-        self._denoise_target_texture.repeat_y = False
-        self._denoise_fbo = self._context.framebuffer(color_attachments=(self._denoise_target_texture,))
+        self._denoise_target_texture0 = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        self._denoise_target_texture0.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._denoise_target_texture0.repeat_x = False
+        self._denoise_target_texture0.repeat_y = False
+        self._denoise_target_texture1 = self._context.texture(self._logical_resolution, 3, dtype="f4")
+        self._denoise_target_texture1.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._denoise_target_texture1.repeat_x = False
+        self._denoise_target_texture1.repeat_y = False
+        self._denoise_fbo0 = self._context.framebuffer(color_attachments=(self._denoise_target_texture0,))
+        self._denoise_fbo1 = self._context.framebuffer(color_attachments=(self._denoise_target_texture1,))
 
 
         # The post-processing shader will rewrite the adapted exposure each frame
@@ -648,7 +687,9 @@ class Renderer:
             "red_wool": pygame.image.load("data/blocks/red_wool.png"),
             "red_light_emissive": pygame.image.load("data/blocks/red_light_emissive.png"),
             "copper_block": pygame.image.load("data/blocks/copper_block.png"),
-            "copper_block_roughness": pygame.image.load("data/blocks/copper_block_roughness.png")
+            "copper_block_roughness": pygame.image.load("data/blocks/copper_block_roughness.png"),
+            "red_stained_glass": pygame.image.load("data/blocks/red_stained_glass.png"),
+            "red_stained_glass_roughness": pygame.image.load("data/blocks/red_stained_glass_roughness.png"),
         }
 
         # albedo atlas
@@ -660,7 +701,7 @@ class Renderer:
             "grass": ("grass_top", "dirt", "grass_side"),
             "iron_block": ("iron_block", "iron_block", "iron_block"),
             "lime_wool": ("lime_wool", "lime_wool", "lime_wool"),
-            "red_wool": ("red_wool", "red_wool", "red_wool"),
+            "red_wool": ("red_stained_glass", "red_stained_glass", "red_stained_glass"),
             "red_light": (0, 0, 0),
             "copper_block": ("copper_block", "copper_block", "copper_block")
         }
@@ -684,9 +725,9 @@ class Renderer:
             "dirt": (50, 50, 50),
             "glowstone": (50, 50, 50),
             "grass": (50, 50, 50),
-            "iron_block": ("iron_block_roughness", "iron_block_roughness", "iron_block_roughness"),
+            "iron_block": (0, 0, 0),
             "lime_wool": (50, 50, 50),
-            "red_wool": (0, 0, 0),
+            "red_wool": ("red_stained_glass_roughness", "red_stained_glass_roughness", "red_stained_glass_roughness"),
             "red_light": (50, 50, 50),
             "copper_block": ("copper_block_roughness", "copper_block_roughness", "copper_block_roughness")
         }
@@ -806,7 +847,9 @@ class Renderer:
 
     def clear_accumulation(self) -> None:
         self._acc_layout_buf.clear()
-    
+        self._pathtracer_fbo0.clear()
+        self._pathtracer_fbo1.clear()
+
     def update_ui_surface(self, hotbar: int = 0) -> None:
         self.ui_surface.fill((0, 0, 0, 0))
 
@@ -1163,18 +1206,18 @@ class Renderer:
         --------------
 
           Pathtracing
-              ↓           (HDR, logical resolution, NEAREST)
+              ↓           (HDR, logical resolution)
           Denoising
               ↓
         Post-processing
-              ↓           (LDR, logical resolution, LINEAR)
+              ↓           (LDR, logical resolution)
              FXAA
               ↓ 
           Upscaling
-              ↓           (LDR, display resolution, LINEAR)
+              ↓           (LDR, display resolution)
           UI overlay
               ↓
-           Display
+          Backbuffer
         """
 
         # Build sun direction from spherical coords
@@ -1240,35 +1283,86 @@ class Renderer:
         else:
             current_target.filter = (moderngl.LINEAR, moderngl.LINEAR)
 
-        if self.settings.pathtracer_output == 0:
-            ... # Current target stays the same
-        elif self.settings.pathtracer_output == 1:
-            current_target = current_normal
-        elif self.settings.pathtracer_output == 2:
-            current_target = current_bounces
+        denoiser_out: moderngl.Texture
+        if self.settings.denoiser_id == 2:
+            # 1-dimensional B3 spline = 1/16 1/4 3/8 1/4 1/16
+            atrous_kernel = (
+                1/256,  4/256,  6/256,  4/256,  1/256,
+                4/256, 16/256, 24/256, 16/256,  4/256,
+                6/256, 24/256, 36/256, 24/256,  6/256,
+                4/256, 16/256, 24/256, 16/256,  4/256,
+                1/256,  4/256,  6/256,  4/256,  1/256
+            )
+            atrous_offset = (
+                (-2.0, -2.0), (-1.0, -2.0), (0.0, -2.0), (1.0, -2.0), (2.0, -2.0),
+                (-2.0, -1.0), (-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (2.0, -1.0),
+                (-2.0,  0.0), (-1.0,  0.0), (0.0,  0.0), (1.0,  0.0), (2.0,  0.0),
+                (-2.0,  1.0), (-1.0,  1.0), (0.0,  1.0), (1.0,  1.0), (2.0,  1.0),
+                (-2.0,  2.0), (-1.0,  2.0), (0.0,  2.0), (1.0,  2.0), (2.0,  2.0)
+            )
 
-        self._denoise_fbo.use()
-        current_target.use(0)
-        self._denoise_vao.render()
+            self._denoise_program["u_atrous_data.kernel"] = atrous_kernel
+            self._denoise_program["u_atrous_data.offset"] = atrous_offset
+
+            for i in range(self.settings.atrous_iters):
+                targets = (self._denoise_target_texture0, self._denoise_target_texture1)
+                fbos = (self._denoise_fbo0, self._denoise_fbo1)
+                fbos[i % 2].use()
+
+                if i == 0:
+                    current_target.use(0)
+                else:
+                    targets[(i + 1) % 2].use(0)
+
+                current_normal.use(2)
+                self._pathtracer_target_position.use(3)
+
+                self._denoise_program["u_atrous_data.stepwidth"] = float(i + 1)
+                self._denoise_vao.render()
+
+                denoiser_out = targets[i % 2]
+
+        else:
+            self._denoise_fbo0.use()
+            current_target.use(0)
+            self._denoise_vao.render()
+            denoiser_out = self._denoise_target_texture0
 
         if self.settings.antialiasing in (0, 1):
             self._post_fbo.use()
-            self._denoise_target_texture.use(0)
+            denoiser_out.use(0)
             current_target.use(1)
+            self._pathtracer_target_albedo.use(2)
             self._post_vao.render()
 
         elif self.settings.antialiasing == 2:
             self._fxaa_fbo.use()
-            self._denoise_target_texture.use(0)
+            denoiser_out.use(0)
             current_target.use(1)
+            self._pathtracer_target_albedo.use(2)
             self._post_vao.render()
 
             self._post_fbo.use()
             self._fxaa_target_texture.use(0)
             self._fxaa_vao.render()
 
+        if self.settings.target_buffer == 0:
+            target_buffer = self._post_target_texture
+        elif self.settings.target_buffer == 1:
+            target_buffer = current_normal
+        elif self.settings.target_buffer == 2:
+            target_buffer = current_normal
+        elif self.settings.target_buffer == 3:
+            target_buffer = current_bounces
+        elif self.settings.target_buffer == 4:
+            target_buffer = self._pathtracer_target_position
+        elif self.settings.target_buffer == 5:
+            target_buffer = self._pathtracer_target_albedo
+
+        self._upscale_program["u_target_buffer"] = self.settings.target_buffer
+
         self._context.screen.use()
-        self._post_target_texture.use(0)
+        target_buffer.use()
         if ui:
             self.ui_texture.use(1)
         else:

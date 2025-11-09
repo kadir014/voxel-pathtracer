@@ -22,6 +22,8 @@ in vec2 v_uv;
 layout(location = 0) out vec4 f_color;
 layout(location = 1) out vec4 f_normal;
 layout(location = 2) out vec4 f_bounces;
+layout(location = 3) out vec4 f_position;
+layout(location = 4) out vec4 f_albedo;
 
 
 uniform int u_ray_count;
@@ -66,6 +68,7 @@ bool issue;
 #include "../libs/preetham.glsl"
 #include "../libs/microfacet.glsl"
 #include "../libs/bsdf.glsl"
+#include "../libs/bicubic.glsl"
 
 
 uniform Camera u_camera;
@@ -305,52 +308,6 @@ vec3 reproject(vec3 world_pos) {
 }
 
 
-void sample_sun_cone(
-    vec3 sun_dir,
-    float sun_angular_radius,
-    out vec3 world_dir,
-    out float pdf
-) {
-    // There must be a better way...
-
-    // We want to sample the sun disk over the hemisphere which creates a cone
-    
-    float r0 = 0.0;
-    float r1 = 0.0;
-    if (u_noise_method == NOISE_METHOD_PRNG) {
-        r0 = prng();
-        r1 = prng();
-    }
-    else if (u_noise_method == NOISE_METHOD_HEITZ_BLUENOISE) {
-        r0 = heitz_sample();
-        r1 = heitz_sample();
-    }
-
-    float cos_theta_max = cos(sun_angular_radius);
-    //float cos_theta = (1.0 - r0) + r0 * cos_theta_max;;
-    float cos_theta = mix(cos_theta_max, 1.0, r0);
-    float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
-    float phi = TAU * r1;
-
-    // Spherical
-    vec3 local = vec3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
-
-    // Should I use the same basis in GGX importance sampler?
-    vec3 w = normalize(sun_dir);
-    vec3 up = abs(w.z) > 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
-    vec3 tangent = normalize(cross(up, w));
-    vec3 bitangent = cross(w, tangent);
-
-    world_dir = normalize(
-        tangent * local.x +
-        bitangent * local.y +
-        w * local.z
-    );
-
-    float solid_angle = 2.0 * PI * (1.0 - cos_theta);
-    pdf = 1.0 / solid_angle;
-}
-
 Material material_from_hitinfo(HitInfo hitinfo) {
     /*
         0 -> Top
@@ -443,6 +400,8 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
                             (!allow_nee || total_bounces == 0);
 
             if (show_sun) {
+                //float solid_angle = TAU * (1.0 - cos_angle) * 1.0;
+                //radiance += u_sun_radiance / solid_angle * radiance_delta;
                 radiance += u_sun_radiance * radiance_delta;
                 break;
             }
@@ -461,6 +420,40 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
                 radiance += sky_color * radiance_delta;
                 break;
             }
+
+        //     float cos_angle = dot(ray.dir, u_sun_direction);
+        //     float cos_theta_max = cos(u_sun_angular_radius);
+        //     float epsilon = 0.003; // smooth edge
+
+        //     // Smooth blend between sun and sky
+        //     vec3 sun_world;
+        //     float sun_pdf;
+        //     sample_sun_cone(ray.dir, u_sun_angular_radius, sun_world, sun_pdf);
+        //     float sun_blend = dot(sun_world, u_sun_direction);
+
+        //     // Match NEE cone radiance
+        //     float solid_angle = TAU * (1.0 - cos_angle);
+        //     vec3 sun_radiance_per_sa = u_sun_radiance / solid_angle;
+
+        //     // Combine sun and sky
+        //    vec3 sky_color;
+        //     if (u_enable_sky_texture) {
+        //         sky_color = texture(s_sky, uv_project_sphere(ray.dir)).rgb;
+        //         // Sky texture is already tonemapped
+        //         // sky_color = pow(sky_color, vec3(2.2));
+        //     }
+        //     else {
+        //         sky_color = preetham_sky(u_sun_direction, ray.dir, u_turbidity) * 0.052;
+        //         sky_color *= vec3(0.00001);
+        //     }
+
+        //     //radiance += vec3(sun_blend) + sky_color;
+        //     //break;
+
+        //     radiance += sun_radiance_per_sa * sun_blend * radiance_delta;
+        //     radiance += sky_color * (1.0 - sun_blend) * radiance_delta;
+
+            break;
         }
 
         /******************************
@@ -507,11 +500,6 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
                     nee_bsdf = diffuse_brdf(V, N, sun_world_dir, state, nee_pdf);
                 }
                 else {
-                    float VoH = dot(V, H);
-
-                    vec3 F = F_Schlick(state.f0, VoH);
-                    float F_avg = (luminance(F));
-
                     if (state.lobe < state.diffuse_weight + state.specular_weight) {
                         nee_bsdf = specular_brdf(V, N, sun_world_dir, H, state, nee_pdf);
                     }
@@ -522,8 +510,11 @@ vec3 pathtrace(Ray ray, out HitInfo primary_hit, out int total_bounces) {
 
                 // Brings NaNs
                 if (nee_pdf > 0.0) {
-                    radiance += radiance_delta * nee_bsdf * u_sun_radiance * NoL / sun_pdf;
+                    radiance += radiance_delta * nee_bsdf * u_sun_radiance / sun_pdf;
                 }
+                // else {
+                //     issue = true;
+                // }
             }
         }
 
@@ -644,12 +635,25 @@ void main() {
 
     vec3 final_color = final_radiance;
 
-    f_normal = vec4(0.0);
+    Material mat = material_from_hitinfo(primary_hit);
+    vec3 albedo = mat.albedo;
+    // Demodulate albedo
     if (primary_hit.hit) {
-        f_normal = vec4(primary_hit.normal * 0.5 + 0.5, 1.0);
+        final_color = mix(final_color / albedo, vec3(0.0), equal(albedo, vec3(0.0)));
+        f_albedo = vec4(albedo, 1.0);
+    }
+    else {
+        f_albedo = vec4(1.0);
     }
 
     float curr_depth = length(primary_hit.point - u_camera.position);
+
+    f_normal = vec4(0.0);
+    if (primary_hit.hit) {
+        f_normal = vec4(primary_hit.normal, curr_depth);
+    }
+
+    f_position = vec4(primary_hit.point, 1.0);
 
     /*
         Temporal accumulation using reprojection:
@@ -703,17 +707,25 @@ void main() {
                 normal_diff > normal_threshold &&
                 rel_depth_diff < depth_threshold
             ) {
-                vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
+                //vec3 previous_color = texture(s_previous_frame, prev_uv.xy).rgb;
+                vec3 previous_color = texture_Bicubic(s_previous_frame, prev_uv.xy).rgb;
 
-                // Temporal blending weight
-                int acc = accumulations[pixel.x + pixel.y * int(u_resolution.x)];
-                float capped_frame = min(float(acc), max_accumulation_frames);
-                float weight = 1.0 / (capped_frame + 1.0);
+                if (!any(isnan(previous_color)) && !any(isinf(previous_color))) {
+                    // Temporal blending weight
+                    int acc = accumulations[pixel.x + pixel.y * int(u_resolution.x)];
+                    float capped_frame = min(float(acc), max_accumulation_frames);
+                    float weight = 1.0 / (capped_frame + 1.0);
 
-                // Blend current and reprojected colors
-                final_color = mix(previous_color, final_color, weight);
+                    // Blend current and reprojected colors
+                    final_color = mix(previous_color, final_color, weight);
 
-                accumulations[pixel.x + pixel.y * int(u_resolution.x)] += 1;
+                    accumulations[pixel.x + pixel.y * int(u_resolution.x)] += 1;
+                }
+                else {
+                    // Don't blend NaN history
+                    final_color = final_color;
+                    accumulations[pixel.x + pixel.y * int(u_resolution.x)] = 0;
+                }
             }
             else {
                 final_color = final_color;

@@ -26,6 +26,7 @@ out vec4 f_color;
 
 uniform sampler2D s_texture;
 uniform sampler2D s_lum;
+uniform sampler2D s_albedo;
 
 uniform bool u_enable_post;
 uniform float u_chromatic_aberration;
@@ -44,6 +45,9 @@ layout(std430, binding = 1) buffer ExposureLayout {
 
 void main() {
     vec3 color = texture(s_texture, v_uv).rgb;
+
+    // Remodulate albedo
+    color *= texture(s_albedo, v_uv).rgb;
 
     if (!u_enable_post) {
         f_color = vec4(color, 1.0);
@@ -81,9 +85,11 @@ void main() {
     vec2 offset = dir * (u_chromatic_aberration * d * dot(nuv, nuv));
     
     // Offset outside screen so repeated pixels at the edges don't show
-    color.r = texture(s_texture, v_uv).r;
-    color.g = texture(s_texture, v_uv - offset).g;
-    color.b = texture(s_texture, v_uv - offset * 2.0).b;
+    // Make sure to remodulate new samples with albedo as well
+    vec4 g_sample = texture(s_texture, v_uv - offset) * texture(s_albedo, v_uv - offset);
+    vec4 b_sample = texture(s_texture, v_uv - offset * 2.0) * texture(s_albedo, v_uv - offset * 2.0);
+    color.g = g_sample.g;
+    color.b = b_sample.b;
 
     /*
         Eye adaptation

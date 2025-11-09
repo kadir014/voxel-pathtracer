@@ -43,20 +43,28 @@ precision highp float;
 
  ******************************************************/
 
-#define ANTIALIASING_NONE            0
-#define ANTIALIASING_JITTERSAMPLING  1
-#define ANTIALIASING_FXAA            2
+#define ANTIALIASING_NONE             0
+#define ANTIALIASING_JITTERSAMPLING   1
+#define ANTIALIASING_FXAA             2
 
-#define NOISE_METHOD_NONE            0
-#define NOISE_METHOD_PRNG            1
-#define NOISE_METHOD_HEITZ_BLUENOISE 2
+#define NOISE_METHOD_NONE             0
+#define NOISE_METHOD_PRNG             1
+#define NOISE_METHOD_HEITZ_BLUENOISE  2
 
-#define DENOISER_NONE                0
-#define DENOISER_BILATERAL           1
+#define DENOISER_NONE                 0
+#define DENOISER_BILATERAL            1
+#define DENOISER_EDGE_AVOIDING_ATROUS 2
 
-#define UPSCALING_METHOD_NEAREST     0
-#define UPSCALING_METHOD_BILINEAR    1
-#define UPSCALING_METHOD_BICUBIC     2
+#define UPSCALING_METHOD_NEAREST      0
+#define UPSCALING_METHOD_BILINEAR     1
+#define UPSCALING_METHOD_BICUBIC      2
+
+#define TARGET_BUFFER_PTGI            0
+#define TARGET_BUFFER_NORMALS         1
+#define TARGET_BUFFER_DEPTH           2
+#define TARGET_BUFFER_BOUNCES         3
+#define TARGET_BUFFER_POSITONS        4
+#define TARGET_BUFFER_ALBEDO          5
 
 
 /******************************************************

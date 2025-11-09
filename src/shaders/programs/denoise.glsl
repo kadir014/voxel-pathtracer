@@ -18,6 +18,8 @@
 #extension GL_ARB_shading_language_include: enable
 
 #include "../libs/common.glsl"
+#include "../libs/bilateral.glsl"
+#include "../libs/atrous.glsl"
 
 
 in vec2 v_uv;
@@ -28,38 +30,8 @@ uniform sampler2D s_texture;
 uniform int u_denoiser;
 uniform vec2 u_resolution;
 
-uniform int u_hw;
-uniform float u_sigmaspace;
-uniform float u_sigmacolor;
-
-
-vec3 bilateral_filter(sampler2D tex, vec2 uv) {
-    // https://www.shadertoy.com/view/NlKczy
-
-    vec4 center = texture(tex, uv);
-
-    float Ss = pow(u_sigmaspace, 2.0) * 2.0;
-    float Sc = pow(u_sigmacolor, 2.0) * 2.0;
-
-    vec4 TW = vec4(0.0); // Sum of Weights
-    vec4 WI = vec4(0.0); // Sum of Weighted Intensities
-    vec4 w = vec4(0.0);
-
-    for (int i = -u_hw; i <= u_hw; i++) {
-        for (int j = -u_hw; j <= u_hw; j++) {
-            vec2 dx = vec2(float(i), float(j));
-            vec2 tc = uv + dx / u_resolution;
-            vec4 Iw = texture(tex, tc);
-            vec4 dc = (center - Iw) * 255.0;
-
-            w = exp(-dot(dx, dx) / Ss - dc*dc / Sc);
-            TW += w;
-            WI += Iw * w;
-        }
-    }
-    
-    return (WI / TW).rgb;
-}
+uniform BilateralData u_bilateral_data;
+uniform ATrousData u_atrous_data;
 
 
 void main() {
@@ -69,7 +41,10 @@ void main() {
         color = texture(s_texture, v_uv).rgb;
     }
     else if (u_denoiser == DENOISER_BILATERAL) {
-        color = bilateral_filter(s_texture, v_uv);
+        color = bilateral_filter(s_texture, v_uv, u_bilateral_data, u_resolution);
+    }
+    else if (u_denoiser == DENOISER_EDGE_AVOIDING_ATROUS) {
+        color = edge_avoiding_atrous(u_atrous_data, v_uv, u_resolution).rgb;
     }
 
     f_color = vec4(color, 1.0);

@@ -115,7 +115,7 @@ class App:
         self.is_running = True
 
         while self.is_running:
-            self.dt = self.clock.tick(self.target_fps) * 0.001
+            self.dt = min(self.clock.tick(self.target_fps) * 0.001, 3.0 / self.target_fps)
 
             self.events = pygame.event.get()
             for event in self.events:
