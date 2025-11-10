@@ -11,7 +11,7 @@
 from math import pi
 
 import pygame
-import imgui
+from slimgui import imgui
 
 from src import shared
 from src.scene import Scene
@@ -109,10 +109,10 @@ class MaterialPreview(Scene):
         renderer.render(ui=False)
 
         imgui.new_frame()
-        imgui.begin("Material Preview (press ALT to use UI)", True, flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
-        imgui.set_window_position(0, 0)
+        imgui.begin("Material Preview (press ALT to use UI)", True, flags=imgui.WindowFlags.NO_MOVE | imgui.WindowFlags.ALWAYS_AUTO_RESIZE)
+        imgui.set_window_pos((0, 0))
 
-        if imgui.tree_node("Information", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Information", imgui.TreeNodeFlags.DEFAULT_OPEN | imgui.TreeNodeFlags.FRAMED):
             imgui.text(f"FPS: {round(app.clock.get_fps())}")
             imgui.text(f"Resolution: {app._resolution[0]}x{app._resolution[1]}")
             imgui.text(f"Renderer: {app._logical_resolution[0]}x{app._logical_resolution[1]} ({round(app.logical_scale, 2)}x)")
@@ -130,8 +130,8 @@ class MaterialPreview(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Material", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-            _, shared.renderer._pt_program["u_exp_material.albedo"].value = imgui.color_edit3("Albedo", *shared.renderer._pt_program["u_exp_material.albedo"].value, imgui.COLOR_EDIT_NO_INPUTS)
+        if imgui.tree_node("Material", imgui.TreeNodeFlags.DEFAULT_OPEN | imgui.TreeNodeFlags.FRAMED):
+            _, shared.renderer._pt_program["u_exp_material.albedo"].value = imgui.color_edit3("Albedo", shared.renderer._pt_program["u_exp_material.albedo"].value, imgui.ColorEditFlags.NO_INPUTS)
             _, shared.renderer._pt_program["u_exp_material.metallic"] = imgui.slider_float("Metallic", shared.renderer._pt_program["u_exp_material.metallic"].value, 0.0, 1.0, format="%.4f")
             _, shared.renderer._pt_program["u_exp_material.roughness"] = imgui.slider_float("Roughness", shared.renderer._pt_program["u_exp_material.roughness"].value, 0.0, 1.0, format="%.4f")
             _, shared.renderer._pt_program["u_exp_material.reflectance"] = imgui.slider_float("Reflectance (f0)", shared.renderer._pt_program["u_exp_material.reflectance"].value, 0.04, 1.00, format="%.4f")
@@ -140,12 +140,12 @@ class MaterialPreview(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-            spp_dec = imgui.arrow_button("decrease-samples", imgui.DIRECTION_LEFT)
+        if imgui.tree_node("Path-tracing", imgui.TreeNodeFlags.DEFAULT_OPEN | imgui.TreeNodeFlags.FRAMED):
+            spp_dec = imgui.arrow_button("decrease-samples", imgui.Dir.LEFT)
             imgui.same_line()
             imgui.text(f"{renderer.settings.ray_count}")
             imgui.same_line()
-            spp_inc = imgui.arrow_button("increase-samples", imgui.DIRECTION_RIGHT)
+            spp_inc = imgui.arrow_button("increase-samples", imgui.Dir.RIGHT)
             imgui.same_line()
             imgui.text("Rays/pixel")
 
@@ -168,7 +168,7 @@ class MaterialPreview(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Sky", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Sky", imgui.TreeNodeFlags.DEFAULT_OPEN | imgui.TreeNodeFlags.FRAMED):
             _, renderer.settings.sky_turbidity = imgui.slider_float(f"Sky turbidity", renderer.settings.sky_turbidity, 2.0, 10.0)
             _, renderer.settings.sun_angular_radius = imgui.slider_float(f"Sun angular radius", renderer.settings.sun_angular_radius, 0.0, pi * 0.05)
             _, renderer.settings.sun_azimuth = imgui.slider_float(f"Sun azimuth", renderer.settings.sun_azimuth, 0.0, 360.0)
@@ -178,7 +178,7 @@ class MaterialPreview(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Controls", imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Controls", imgui.TreeNodeFlags.FRAMED):
             imgui.text(f"[MWHEEL] to zoom in & out")
             imgui.text(f"[R] to reset accumulation")
             imgui.text(f"[ALT] to use toggle cursor and use UI")

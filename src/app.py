@@ -12,7 +12,7 @@ import platform
 
 import pygame
 import moderngl
-import imgui
+from slimgui import imgui
 
 from src import shared
 from src.common import __version__, OGL_VERSION
@@ -109,7 +109,7 @@ class App:
         ogl_major = shared.renderer._context.info["GL_MAJOR_VERSION"]
         ogl_minor = shared.renderer._context.info["GL_MINOR_VERSION"]
         self.opengl_version = f"{ogl_major}.{ogl_minor}"
-        self.imgui_version = imgui.__version__
+        self.imgui_version = imgui.get_version()
 
     def run(self) -> None:
         self.is_running = True

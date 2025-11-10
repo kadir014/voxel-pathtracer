@@ -12,7 +12,7 @@ from math import pi
 from time import perf_counter
 
 import pygame
-import imgui
+from slimgui import imgui
 
 from src import shared
 from src.scene import Scene
@@ -221,10 +221,10 @@ class Sandbox(Scene):
         renderer.render(ui=True)
 
         imgui.new_frame()
-        imgui.begin("Sandbox Scene (press ALT to use UI)", True, flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
-        imgui.set_window_position(0, 0)
+        imgui.begin("Sandbox Scene (press ALT to use UI)", True, flags=imgui.WindowFlags.NO_MOVE | imgui.WindowFlags.ALWAYS_AUTO_RESIZE)
+        imgui.set_window_pos((0, 0))
 
-        if imgui.tree_node("Information", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Information", imgui.TreeNodeFlags.DEFAULT_OPEN| imgui.TreeNodeFlags.FRAMED):
             imgui.text(f"FPS: {round(app.clock.get_fps())}")
             imgui.text(f"Resolution: {app._resolution[0]}x{app._resolution[1]}")
             imgui.text(f"Renderer: {app._logical_resolution[0]}x{app._logical_resolution[1]} ({round(app.logical_scale, 2)}x)")
@@ -242,7 +242,7 @@ class Sandbox(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Statistics", imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Statistics", imgui.TreeNodeFlags.FRAMED):
             _, renderer.settings.collect_information = imgui.checkbox("Collect stats (affects performance *heavily*)", renderer.settings.collect_information)
 
             if not renderer.settings.collect_information:
@@ -273,7 +273,7 @@ class Sandbox(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Color grading", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Color grading", imgui.TreeNodeFlags.DEFAULT_OPEN | imgui.TreeNodeFlags.FRAMED):
             _, renderer.settings.postprocessing = imgui.checkbox("Post-processing", renderer.settings.postprocessing)
 
             clicked, self.current_color_profile = imgui.combo(
@@ -303,12 +303,12 @@ class Sandbox(Scene):
             
             imgui.tree_pop()
 
-        if imgui.tree_node("Path-tracing", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
-            spp_dec = imgui.arrow_button("decrease-samples", imgui.DIRECTION_LEFT)
+        if imgui.tree_node("Path-tracing", imgui.TreeNodeFlags.DEFAULT_OPEN| imgui.TreeNodeFlags.FRAMED):
+            spp_dec = imgui.arrow_button("decrease-samples", imgui.Dir.LEFT)
             imgui.same_line()
             imgui.text(f"{renderer.settings.ray_count}")
             imgui.same_line()
-            spp_inc = imgui.arrow_button("increase-samples", imgui.DIRECTION_RIGHT)
+            spp_inc = imgui.arrow_button("increase-samples", imgui.Dir.RIGHT)
             imgui.same_line()
             imgui.text("Rays/pixel")
 
@@ -344,7 +344,7 @@ class Sandbox(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Denoising", imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Denoising", imgui.TreeNodeFlags.FRAMED):
             clicked, selected_denoiser = imgui.combo(
                 "Denoiser", renderer.settings.denoiser_id, renderer.settings.denoisers
             )
@@ -358,13 +358,13 @@ class Sandbox(Scene):
 
             elif selected_denoiser == 2:
                 _, renderer.settings.atrous_iters = imgui.slider_int(f"Iterations", renderer.settings.atrous_iters, 1, 10)
-                _, renderer._denoise_program["u_atrous_data.gi_phi"] = imgui.slider_float(f"gi_phi", renderer._denoise_program["u_atrous_data.gi_phi"].value, 0.0, 2.0)
+                _, renderer._denoise_program["u_atrous_data.gi_phi"] = imgui.slider_float(f"gi_phi", renderer._denoise_program["u_atrous_data.gi_phi"].value, 0.0, 120.0)
                 _, renderer._denoise_program["u_atrous_data.normal_phi"] = imgui.slider_float(f"normal_phi", renderer._denoise_program["u_atrous_data.normal_phi"].value, 0.0, 0.5)
                 _, renderer._denoise_program["u_atrous_data.position_phi"] = imgui.slider_float(f"position_phi", renderer._denoise_program["u_atrous_data.position_phi"].value, 0.0, 0.5)
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Sky", imgui.TREE_NODE_DEFAULT_OPEN | imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Sky", imgui.TreeNodeFlags.DEFAULT_OPEN| imgui.TreeNodeFlags.FRAMED):
             #_, renderer.settings.sun_radiance = imgui.slider_float(f"Sun radiance", renderer.settings.sun_radiance, 0.0, 5000.0)
             _, renderer.settings.sky_turbidity = imgui.slider_float(f"Sky turbidity", renderer.settings.sky_turbidity, 2.0, 10.0)
             _, renderer.settings.sun_angular_radius = imgui.slider_float(f"Sun angular radius", renderer.settings.sun_angular_radius, 0.0, pi * 0.05)
@@ -375,13 +375,13 @@ class Sandbox(Scene):
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Camera", imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Camera", imgui.TreeNodeFlags.FRAMED):
             _, self.camera.fov = imgui.slider_float("FOV", self.camera.fov, 0.0, 180.0, format="%.4f")
             _, self.mouse_sensitivity = imgui.slider_float("Sensitivity", self.mouse_sensitivity, 0.01, 0.3, format="%.4f")
 
             imgui.tree_pop()
 
-        if imgui.tree_node("Controls", imgui.TREE_NODE_FRAMED):
+        if imgui.tree_node("Controls", imgui.TreeNodeFlags.FRAMED):
             imgui.text(f"[LMB] to break voxels")
             imgui.text(f"[RMB] to place voxels")
             imgui.text(f"[WASD] to move around")

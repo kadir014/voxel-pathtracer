@@ -1,4 +1,4 @@
 pygame-ce
 moderngl
-imgui
+slimgui
 numpy

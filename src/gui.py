@@ -14,7 +14,7 @@ import ctypes
 
 import pygame
 import moderngl
-import imgui
+from slimgui import imgui
 
 
 class ImguiPygameModernGLAbomination:
@@ -112,7 +112,7 @@ class ImguiPygameModernGLAbomination:
         self._ibo.release()
         self._vao.release()
 
-    def load_font(self, filepath: str, size: float) -> imgui.core._Font:
+    def load_font(self, filepath: str, size: float):
         """
         Load custom TTF/OTF font into ImGUI.
         Returns the loaded font object to be used when rendering.
@@ -162,12 +162,12 @@ class ImguiPygameModernGLAbomination:
 
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN:
-                self.io.mouse_down[event.button - 1] = True
+                self.io.add_mouse_button_event(event.button - 1, True)
 
             if event.type == pygame.MOUSEBUTTONUP:
-                self.io.mouse_down[event.button - 1] = False
+                self.io.add_mouse_button_event(event.button - 1, False)
 
-        self.io.mouse_pos = pygame.mouse.get_pos()
+        self.io.add_mouse_pos_event(*pygame.mouse.get_pos())
 
     def render(self, draw_data) -> None:
         """
@@ -179,8 +179,8 @@ class ImguiPygameModernGLAbomination:
             ImGUI draw commands (`imgui.get_draw_data`)
         """
 
-        display_width = self.io.display_size.x
-        display_height = self.io.display_size.y
+        display_width = self.io.display_size[0]
+        display_height = self.io.display_size[1]
 
         # Thanks to moderngl_window, imgui's draw commands are very low level
 
@@ -188,7 +188,7 @@ class ImguiPygameModernGLAbomination:
         self._context.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
         self._context.blend_equation = moderngl.FUNC_ADD
 
-        draw_data.scale_clip_rects(1.0, 1.0)
+        draw_data.scale_clip_rects((1.0, 1.0))
 
         self._proj.value = (
             2.0 / display_width, 0.0,                   0.0,  0.0,
@@ -209,7 +209,7 @@ class ImguiPygameModernGLAbomination:
             idx_pos = 0
             for command in commands.commands:
                 # Texture's command id = moderngl `glo` attribute
-                texture = self._textures[command.texture_id]
+                texture = self._textures[command.tex_ref.get_tex_id()]
                 texture.use(0)
             
                 x, y, z, w = command.clip_rect

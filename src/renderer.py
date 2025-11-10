@@ -12,8 +12,8 @@ from typing import TextIO
 
 from array import array
 from struct import unpack, pack
-from time import perf_counter
-from math import log, sin, cos, radians
+from time import perf_counter, time
+from math import log, sin, cos, radians, fmod
 
 import pygame
 import moderngl
@@ -93,7 +93,7 @@ class RendererSettings:
 
     @property
     def postprocessing(self) -> bool:
-        return self.__renderer._post_program["u_enable_post"].value
+        return bool(self.__renderer._post_program["u_enable_post"].value)
     
     @postprocessing.setter
     def postprocessing(self, value: bool) -> None:
@@ -126,7 +126,7 @@ class RendererSettings:
     @property
     def enable_eye_adaptation(self) -> bool:
         data = self.__renderer._exposure_layout_buf.read(4, 4 * 0)
-        return unpack("I", data)[0]
+        return bool(unpack("I", data)[0])
     
     @enable_eye_adaptation.setter
     def enable_eye_adaptation(self, value: bool) -> None:
@@ -206,7 +206,7 @@ class RendererSettings:
 
     @property
     def russian_roulette(self) -> bool:
-        return self.__renderer._pt_program["u_enable_roulette"].value
+        return bool(self.__renderer._pt_program["u_enable_roulette"].value)
     
     @russian_roulette.setter
     def russian_roulette(self, value: bool) -> None:
@@ -214,7 +214,7 @@ class RendererSettings:
 
     @property
     def nee(self) -> bool:
-        return self.__renderer._pt_program["u_enable_nee"].value
+        return bool(self.__renderer._pt_program["u_enable_nee"].value)
     
     @nee.setter
     def nee(self, value: bool) -> None:
@@ -222,7 +222,7 @@ class RendererSettings:
 
     @property
     def enable_sky_texture(self) -> bool:
-        return self.__renderer._pt_program["u_enable_sky_texture"].value
+        return bool(self.__renderer._pt_program["u_enable_sky_texture"].value)
     
     @enable_sky_texture.setter
     def enable_sky_texture(self, value: bool) -> None:
@@ -230,7 +230,7 @@ class RendererSettings:
 
     @property
     def enable_accumulation(self) -> bool:
-        return self.__renderer._pt_program["u_enable_accumulation"].value
+        return bool(self.__renderer._pt_program["u_enable_accumulation"].value)
     
     @enable_accumulation.setter
     def enable_accumulation(self, value: bool) -> None:
@@ -479,7 +479,7 @@ class Renderer:
         self._pt_program["s_glass_atlas"] = 6
         self._pt_program["s_previous_frame"] = 7
         self._pt_program["s_previous_normal"] = 8
-        self._pt_program["u_ray_count"] = 8
+        self._pt_program["u_ray_count"] = 4
         self._pt_program["u_bounces"] = 3
         self._pt_program["u_noise_method"] = 1
         self._pt_program["u_enable_roulette"] = False
@@ -788,6 +788,8 @@ class Renderer:
 
         # Total number of rays shot from camera and bounces this frame
         self.frame_ray_count = 0
+
+        self.start = time()
 
     def __del__(self) -> None:
         self._context.release()
@@ -1224,6 +1226,9 @@ class Renderer:
         # Altitude is the same as "pitch"
         # Azimuth is the horizontal angle of the sun measured clockwise from North
         # it's also almost the same as "yaw"
+
+        #t = (time() - self.start) * 10
+        #self.settings.sun_altitude = fmod(t, 180.0)
 
         pitch_r = radians(self.settings.sun_altitude)
         yaw_r = radians(self.settings.sun_azimuth)
